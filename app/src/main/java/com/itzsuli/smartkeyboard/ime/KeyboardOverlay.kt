@@ -152,30 +152,54 @@ class KeyboardOverlay(context: Context) : View(context) {
         }
     }
 
+    private val trailPath = android.graphics.Path()
+
+    /**
+     * Draws the trail as a few smooth curve chunks: each chunk is one path (so semi-transparent
+     * strokes never overlap into dots), older chunks get thinner and fainter like a comet tail.
+     */
     private fun drawTrail(canvas: Canvas) {
         if (tCount < 2) return
         val now = SystemClock.uptimeMillis()
         val releaseFade = if (trailReleasedAt > 0) ((now - trailReleasedAt) / RELEASE_FADE_MS.toFloat()).coerceIn(0f, 1f) else 0f
         if (releaseFade >= 1f) { tCount = 0; return }
+        // Skip points that have fully faded.
+        var first = 0
+        while (first < tCount - 1 && now - tt[(tStart + first) % MAX_TRAIL] > TRAIL_LIFE_MS) first++
+        val visible = tCount - first
+        if (visible < 2) { if (trailReleasedAt > 0) postInvalidateOnAnimation(); return }
         val color = theme.accent
-        val maxW = 5.5f * density
-        var animating = trailReleasedAt > 0
-        for (i in 1 until tCount) {
-            val a = (tStart + i - 1) % MAX_TRAIL
-            val b = (tStart + i) % MAX_TRAIL
-            val age = now - tt[b]
-            // Older segments thin out and fade, which gives the trail its comet-like tail.
+        val maxW = 6f * density
+        val chunk = maxOf(4, visible / TRAIL_CHUNKS)
+        var i = first
+        while (i < tCount - 1) {
+            val end = minOf(tCount - 1, i + chunk)
+            val head = end == tCount - 1
+            val pos = (end - first) / visible.toFloat()
+            val age = now - tt[(tStart + end) % MAX_TRAIL]
             val life = 1f - (age / TRAIL_LIFE_MS.toFloat()).coerceIn(0f, 1f)
-            if (life <= 0f) continue
-            if (life < 1f) animating = true
-            val pos = i / tCount.toFloat()
-            val alpha = (255 * life * (0.35f + 0.65f * pos) * (1f - releaseFade)).toInt()
-            if (alpha <= 2) continue
-            trailPaint.color = Color.argb(alpha, Color.red(color), Color.green(color), Color.blue(color))
-            trailPaint.strokeWidth = maxW * (0.35f + 0.65f * min(1f, life * 1.2f)) * (0.6f + 0.4f * pos)
-            canvas.drawLine(tx[a], ty[a], tx[b], ty[b], trailPaint)
+            val alpha = (255 * (0.25f + 0.75f * pos) * (0.4f + 0.6f * life) * (1f - releaseFade)).toInt()
+            if (alpha > 2) {
+                trailPath.reset()
+                var px = tx[(tStart + i) % MAX_TRAIL]
+                var py = ty[(tStart + i) % MAX_TRAIL]
+                trailPath.moveTo(px, py)
+                for (j in i + 1..end) {
+                    val x = tx[(tStart + j) % MAX_TRAIL]
+                    val y = ty[(tStart + j) % MAX_TRAIL]
+                    // Quadratic curves through midpoints smooth out the touch sampling.
+                    trailPath.quadTo(px, py, (px + x) / 2, (py + y) / 2)
+                    px = x; py = y
+                }
+                trailPath.lineTo(px, py)
+                trailPaint.strokeCap = if (head) Paint.Cap.ROUND else Paint.Cap.BUTT
+                trailPaint.color = Color.argb(alpha, Color.red(color), Color.green(color), Color.blue(color))
+                trailPaint.strokeWidth = maxW * (0.3f + 0.7f * pos)
+                canvas.drawPath(trailPath, trailPaint)
+            }
+            i = end
         }
-        if (animating) postInvalidateOnAnimation()
+        postInvalidateOnAnimation()
     }
 
     private fun opaque(c: Int) = Color.rgb(Color.red(c), Color.green(c), Color.blue(c))
@@ -184,5 +208,6 @@ class KeyboardOverlay(context: Context) : View(context) {
         private const val MAX_TRAIL = 512
         private const val TRAIL_LIFE_MS = 650L
         private const val RELEASE_FADE_MS = 220L
+        private const val TRAIL_CHUNKS = 10
     }
 }

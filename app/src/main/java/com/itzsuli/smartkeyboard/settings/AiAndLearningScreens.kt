@@ -89,10 +89,14 @@ fun AiScreen(onBack: () -> Unit) {
     var models by remember { mutableStateOf<List<String>>(emptyList()) }
 
     fun save() {
-        s.set(Settings.AI_KEY, key.trim())
+        s.set("${Settings.AI_KEY}_${preset.id}", key.trim())
         s.set(Settings.AI_MODEL, model.trim())
         s.set(Settings.AI_BASE_URL, if (preset == ProviderPreset.CLAUDE) "" else baseUrl.trim())
     }
+
+    // Never lose a pasted key because "Save" wasn't tapped.
+    val latestSave by androidx.compose.runtime.rememberUpdatedState({ save() })
+    androidx.compose.runtime.DisposableEffect(Unit) { onDispose { latestSave() } }
 
     SettingsPage("AI assistant", onBack) {
         item {
@@ -126,6 +130,7 @@ fun AiScreen(onBack: () -> Unit) {
                             ProviderPreset.entries.forEach { p ->
                                 DropdownMenuItem(text = { Text(p.label) }, onClick = {
                                     expanded = false
+                                    save()
                                     s.set(Settings.AI_PROVIDER, p.id)
                                     s.set(Settings.AI_MODEL, "")
                                     s.set(Settings.AI_BASE_URL, "")

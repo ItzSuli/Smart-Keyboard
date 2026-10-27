@@ -55,11 +55,12 @@ object AiProviders {
 }
 
 /** Claude through the official Anthropic Java SDK. */
-class ClaudeProvider(apiKey: String, private val model: String) : AiProvider {
+class ClaudeProvider(apiKey: String, private val model: String, baseUrl: String? = null) : AiProvider {
     private val client: AnthropicClient = AnthropicOkHttpClient.builder()
         .apiKey(apiKey)
         .timeout(Duration.ofSeconds(45))
         .maxRetries(1)
+        .apply { if (baseUrl != null) baseUrl(baseUrl) }
         .build()
 
     override fun complete(system: String, user: String, maxTokens: Int, fast: Boolean): String {

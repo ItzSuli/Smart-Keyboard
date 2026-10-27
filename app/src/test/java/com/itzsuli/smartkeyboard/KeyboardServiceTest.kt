@@ -66,6 +66,12 @@ class KeyboardServiceTest {
         startInput(InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_CAP_SENTENCES)
     }
 
+    private fun findOverlay(v: View): com.itzsuli.smartkeyboard.ime.KeyboardOverlay? {
+        if (v is com.itzsuli.smartkeyboard.ime.KeyboardOverlay) return v
+        if (v is ViewGroup) for (i in 0 until v.childCount) findOverlay(v.getChildAt(i))?.let { return it }
+        return null
+    }
+
     private fun find(v: View): KeyboardView? {
         if (v is KeyboardView) return v
         if (v is ViewGroup) for (i in 0 until v.childCount) find(v.getChildAt(i))?.let { return it }
@@ -204,17 +210,76 @@ class KeyboardServiceTest {
         assertTrue(text, text.endsWith("skrrt skrrt skrrt "))
     }
 
+    @Test fun aiProofreadsFinishedSentencesTheChillWay() {
+        FakeHttpServer().use { fake ->
+            fake.reply = """{"choices":[{"message":{"role":"assistant","content":"Me and him go there tomorrow."}}]}"""
+            val s = (org.robolectric.RuntimeEnvironment.getApplication() as SmartKeyboardApp).settings
+            s.set(Settings.AI_PROVIDER, "custom")
+            s.set(Settings.AI_BASE_URL, fake.baseUrl + "/v1")
+            s.set(Settings.AI_MODEL, "test-model")
+            s.set("${Settings.AI_KEY}_custom", "k")
+            s.set(Settings.AI_SUGGESTIONS, false)
+            s.set(Settings.AI_AUTO_PROOF, com.itzsuli.smartkeyboard.data.AiAutoProof.SUGGEST)
+            type("me and him goes there tomorow. ")
+            assertEquals("Me and him goes there tomorrow. ", text)
+            waitUntil { fake.requests > 0 }
+            Thread.sleep(200); idle()
+            // The sentence (after local fixes) went to the AI, wrapped and with the chill rules.
+            assertTrue(fake.lastBody, fake.lastBody.contains("<text>Me and him goes there tomorrow."))
+            assertTrue(fake.lastBody.contains("Keep it chill"))
+            service.onAiChipTapped()
+            sync()
+            assertEquals("Me and him go there tomorrow. ", text)
+        }
+    }
+
     @Test fun rendersKeyboardScreenshots() {
         val out = File("build/screenshots").apply { mkdirs() }
         fun shot(name: String) {
             layout()
-            val bmp = Bitmap.createBitmap(root.width, root.height, Bitmap.Config.ARGB_8888)
-            root.draw(Canvas(bmp))
+            val full = Bitmap.createBitmap(root.width, root.height, Bitmap.Config.ARGB_8888)
+            root.draw(Canvas(full))
+            // Keep a little of the transparent preview band so popups above the top row show.
+            val top = (service.previewSpacePx - 40).coerceAtLeast(0)
+            val bmp = Bitmap.createBitmap(full, 0, top, full.width, full.height - top)
             File(out, "$name.png").outputStream().use { bmp.compress(Bitmap.CompressFormat.PNG, 100, it) }
         }
         type("how are ")
         Thread.sleep(200); idle()
         shot("english_light")
+        // Swipe trail for "hello" as drawn mid-gesture.
+        val overlay = findOverlay(root)!!
+        val loc = IntArray(2).also { keyboard.getLocationInWindow(it) }
+        val oLoc = IntArray(2).also { overlay.getLocationInWindow(it) }
+        overlay.trailStart()
+        var px = Float.NaN; var py = Float.NaN
+        for (c in "hello") {
+            val k = key(c.toString())
+            val x = k.bounds.centerX() + loc[0] - oLoc[0]
+            val y = k.bounds.centerY() + loc[1] - oLoc[1]
+            if (!px.isNaN()) for (i in 1..16) overlay.trailAdd(px + (x - px) * i / 16f, py + (y - py) * i / 16f) else overlay.trailAdd(x, y)
+            px = x; py = y
+        }
+        service.showSwipePreview("hello")
+        shot("swipe")
+        overlay.trailEnd()
+        Thread.sleep(400)
+        // Long-press accents on "e" (top row: the popup lives in the band above the keys).
+        val e = key("e")
+        overlay.showPopup(listOf("3", "é", "è", "ê", "ë", "ē"), android.graphics.RectF(e.bounds.left + loc[0] - oLoc[0], e.bounds.top + loc[1] - oLoc[1],
+            e.bounds.right + loc[0] - oLoc[0], e.bounds.bottom + loc[1] - oLoc[1]))
+        overlay.selectPopupAt(e.bounds.centerX() + e.bounds.width() + loc[0] - oLoc[0])
+        shot("accents")
+        overlay.hidePopup()
+        Thread.sleep(400)
+        service.showAiChip("✨ Me and him go there tomorrow.")
+        shot("ai_chip")
+        service.showAiChip(null)
+        service.onToolbarAction(com.itzsuli.smartkeyboard.ime.SuggestionStripView.ToolbarAction.EMOJI)
+        repeat(5) { idle(); Thread.sleep(30) }
+        shot("emoji")
+        service.onKeyTap(com.itzsuli.smartkeyboard.ime.Key("ABC", KeyCode.ALPHABET), 0f, 0f)
+        repeat(3) { idle() }
         val s = (org.robolectric.RuntimeEnvironment.getApplication() as SmartKeyboardApp).settings
         for (t in listOf("dark", "sunset", "neon", "glass")) {
             s.set(Settings.THEME, t)

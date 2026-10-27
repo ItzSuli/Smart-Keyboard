@@ -1,0 +1,115 @@
+name: Build & release
+
+on:
+  push:
+    branches: ["**"]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Unit tests (engine benchmarks + keyboard service + AI providers)
+        run: ./gradlew :engine:test :app:testDebugUnitTest --stacktrace
+
+      - name: Prepare signing key
+        env:
+          SK_KEYSTORE_B64: ${{ secrets.SK_KEYSTORE_B64 }}
+          SK_KEYSTORE_PASSWORD: ${{ secrets.SK_KEYSTORE_PASSWORD }}
+          SK_KEY_ALIAS: ${{ secrets.SK_KEY_ALIAS }}
+          SK_KEY_PASSWORD: ${{ secrets.SK_KEY_PASSWORD }}
+        run: |
+          if [ -n "$SK_KEYSTORE_B64" ]; then
+            echo "$SK_KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/release.jks"
+            {
+              echo "SK_KEYSTORE_FILE=$RUNNER_TEMP/release.jks"
+              echo "SK_KEYSTORE_PASSWORD=$SK_KEYSTORE_PASSWORD"
+              echo "SK_KEY_ALIAS=$SK_KEY_ALIAS"
+              echo "SK_KEY_PASSWORD=${SK_KEY_PASSWORD:-$SK_KEYSTORE_PASSWORD}"
+              echo "SIGNING=permanent"
+            } >> "$GITHUB_ENV"
+          else
+            # No signing secrets yet: sign this build with a one-off key (see docs/RELEASING.md).
+            PW="$(openssl rand -hex 24)"
+            echo "::add-mask::$PW"
+            keytool -genkeypair -keystore "$RUNNER_TEMP/temp.jks" -storetype PKCS12 -alias smartkeyboard \
+              -keyalg RSA -keysize 3072 -validity 36500 -storepass "$PW" -keypass "$PW" \
+              -dname "CN=Smart Keyboard, O=ItzSuli" > /dev/null
+            {
+              echo "SK_KEYSTORE_FILE=$RUNNER_TEMP/temp.jks"
+              echo "SK_KEYSTORE_PASSWORD=$PW"
+              echo "SK_KEY_ALIAS=smartkeyboard"
+              echo "SK_KEY_PASSWORD=$PW"
+              echo "SIGNING=temporary"
+            } >> "$GITHUB_ENV"
+          fi
+
+      - name: Build release APK
+        run: ./gradlew :app:assembleRelease --stacktrace
+
+      - name: Name the APK
+        run: |
+          VERSION="$(grep -oP 'versionName = "\K[^"]+' app/build.gradle.kts)"
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+          cp app/build/outputs/apk/release/app-release.apk "SmartKeyboard-v$VERSION.apk"
+          sha256sum "SmartKeyboard-v$VERSION.apk" | tee "SmartKeyboard-v$VERSION.apk.sha256"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: SmartKeyboard-apk
+          path: |
+            SmartKeyboard-v*.apk
+            SmartKeyboard-v*.apk.sha256
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: screenshots
+          path: app/build/screenshots/
+
+      # Releases come from main, version tags, manual runs, or any commit whose message contains [release].
+      - name: Publish GitHub release
+        if: >-
+          github.event_name != 'pull_request' && (
+            github.ref == 'refs/heads/main' ||
+            startsWith(github.ref, 'refs/tags/v') ||
+            github.event_name == 'workflow_dispatch' ||
+            contains(github.event.head_commit.message, '[release]'))
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="v$VERSION"
+          cp RELEASE_NOTES.md notes.md
+          if [ "$SIGNING" = "temporary" ]; then
+            cat >> notes.md <<'NOTE'
+
+          > **Note on updates:** this build is signed with a one-off key because the repository has no
+          > signing secrets yet. Android only installs an update signed with the same key, so before
+          > installing a later build: export your learned words (Settings → Your words & learning →
+          > Export), uninstall, install the new APK and import them again. Adding the signing secrets
+          > described in `docs/RELEASING.md` makes every future update install seamlessly.
+          NOTE
+          fi
+          # Re-publishing the same version replaces the previous build of it.
+          gh release delete "$TAG" --cleanup-tag --yes || true
+          gh release create "$TAG" "SmartKeyboard-v$VERSION.apk" "SmartKeyboard-v$VERSION.apk.sha256" \
+            --target "$GITHUB_SHA" --title "Smart Keyboard $VERSION" --notes-file notes.md --latest

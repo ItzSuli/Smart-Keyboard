@@ -222,7 +222,8 @@ fun KeyboardPreview(theme: KeyboardTheme, modifier: Modifier, radiusDp: Float = 
         val cols = 10
         val keyW = (size.width - pad * 2) / cols
         val gap = keyW * 0.12f
-        val r = CornerRadius(radiusDp * density * (size.width / 1000f).coerceAtLeast(0.35f))
+        // The preview stands for a ~411dp wide keyboard drawn at size.width pixels.
+        val r = CornerRadius(radiusDp * size.width / 411f)
         for (row in 0 until rows) {
             val y = pad + row * rowH
             val last = row == rows - 1

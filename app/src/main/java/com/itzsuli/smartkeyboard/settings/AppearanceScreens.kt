@@ -78,7 +78,7 @@ fun AppearanceScreen(onBack: () -> Unit) {
     SettingsPage("Appearance", onBack) {
         item {
             val current = KeyboardTheme.resolve(context, s).let { if (accent != 0) it.withAccent(accent) else it }
-            KeyboardPreview(current, Modifier.fillMaxWidth().aspectRatio(2.2f).clip(RoundedCornerShape(22.dp)), radius.toFloat() * 2.5f, borders)
+            KeyboardPreview(current, Modifier.fillMaxWidth().aspectRatio(2.2f).clip(RoundedCornerShape(22.dp)), radius.toFloat(), borders)
         }
         item {
             Group("Theme") {

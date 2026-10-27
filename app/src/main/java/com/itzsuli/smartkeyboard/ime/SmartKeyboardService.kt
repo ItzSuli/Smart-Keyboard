@@ -83,6 +83,23 @@ open class SmartKeyboardService : InputMethodService(), KeyboardView.Listener, S
 
     override fun onEvaluateFullscreenMode(): Boolean = false
 
+    /** Height of the transparent band above the keyboard (for previews and popups). */
+    val previewSpacePx: Int get() = (72 * resources.displayMetrics.density).toInt()
+
+    override fun onComputeInsets(outInsets: InputMethodService.Insets) {
+        super.onComputeInsets(outInsets)
+        val frame = root ?: return
+        val col = column ?: return
+        if (frame.height == 0) return
+        val loc = IntArray(2)
+        frame.getLocationInWindow(loc)
+        val visibleTop = loc[1] + col.top
+        outInsets.contentTopInsets = visibleTop
+        outInsets.visibleTopInsets = visibleTop
+        outInsets.touchableInsets = InputMethodService.Insets.TOUCHABLE_INSETS_REGION
+        outInsets.touchableRegion.set(0, visibleTop, frame.width, loc[1] + frame.height)
+    }
+
     // ------------------------------------------------------------------ views
 
     override fun onCreateInputView(): View {
@@ -97,7 +114,11 @@ open class SmartKeyboardService : InputMethodService(), KeyboardView.Listener, S
         col.addView(stripView, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
         col.addView(host, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, keyboardHeight()))
         val frame = FrameLayout(ctx)
-        frame.addView(col, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.BOTTOM))
+        // A transparent band above the keyboard gives key previews and accent popups room to draw;
+        // onComputeInsets keeps it from covering the app or taking its touches.
+        frame.addView(col, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.BOTTOM).apply {
+            topMargin = previewSpacePx
+        })
         frame.addView(overlayView, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
         root = frame; column = col; strip = stripView; keyboardView = kv; overlay = overlayView; panelHost = host
         applyTheme()
@@ -241,8 +262,7 @@ open class SmartKeyboardService : InputMethodService(), KeyboardView.Listener, S
             Settings.INCOGNITO -> { strip?.incognito = settings.incognito; currentInputEditorInfo?.let { logic.startInput(it, true) } }
             Settings.ONE_HANDED, Settings.KEY_HEIGHT, Settings.NUMBER_ROW -> { rebuildLayout(); showKeyboard() }
             Settings.EMOJI_KEY, Settings.SHOW_HINTS, Settings.ARABIC_DIGITS -> rebuildLayout()
-            Settings.AI_KEY, Settings.AI_PROVIDER, Settings.AI_ENABLED -> strip?.aiAvailable = app.ai.isConfigured
-            else -> applyTheme()
+            else -> if (key?.startsWith("ai_") == true) strip?.aiAvailable = app.ai.isConfigured else applyTheme()
         }
     }
 

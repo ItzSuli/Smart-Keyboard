@@ -82,12 +82,13 @@ class Settings(context: Context) {
 
     // ---- AI ----
     val aiProvider get() = str(AI_PROVIDER, "gemini")
-    val aiApiKey get() = str(AI_KEY, "")
+    /** Keys are stored per provider so switching services never mixes them up. */
+    val aiApiKey get() = str("${AI_KEY}_$aiProvider", "")
     val aiModel get() = str(AI_MODEL, "")
     val aiBaseUrl get() = str(AI_BASE_URL, "")
     val aiAutoProof get() = enumValueOrDefault(str(AI_AUTO_PROOF, AiAutoProof.SUGGEST.name), AiAutoProof.SUGGEST)
     val aiSuggestions get() = bool(AI_SUGGESTIONS, true)
-    val aiEnabled get() = bool(AI_ENABLED, true) && aiApiKey.isNotBlank()
+    val aiEnabled get() = bool(AI_ENABLED, true) && (aiApiKey.isNotBlank() || (aiProvider == "custom" && aiBaseUrl.isNotBlank()))
     val aiTone get() = str(AI_TONE, "chill")
 
     val onboardingDone get() = bool(ONBOARDING_DONE, false)

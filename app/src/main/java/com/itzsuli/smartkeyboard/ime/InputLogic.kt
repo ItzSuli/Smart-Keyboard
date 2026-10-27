@@ -429,8 +429,9 @@ class InputLogic(private val service: SmartKeyboardService) {
                 lc.typed.forEach { touches.add(TypedChar(it)) }
                 setComposing(composing)
                 conn.endBatchEdit()
+                // Remembered right away (cheap, in memory), so the very next space respects it.
                 val m = model
-                if (m != null && allowLearning) worker.execute {
+                if (m != null && allowLearning) {
                     m.user.learnRejection(TextUtils.key(lc.typed, lang), TextUtils.key(lc.committed, lang))
                     app.store.incrementStat("corrections_undone")
                 }
@@ -614,7 +615,7 @@ class InputLogic(private val service: SmartKeyboardService) {
         val shiftOn = service.shiftState != KeyboardView.ShiftState.OFF
         val swipeAlts = swipeAlternatives
         val mode = if (allowAutocorrect) settings.autoCorrectMode else AutoCorrectMode.OFF
-        val emoji = if (settings.emojiSuggestions) EmojiData.get(service) else null
+        val wantEmoji = settings.emojiSuggestions
         val textForAi = if (typed.isEmpty()) textBefore(400).toString() else ""
         worker.execute {
             if (gen != generation.get()) return@execute
@@ -638,7 +639,8 @@ class InputLogic(private val service: SmartKeyboardService) {
                         list.add(minOf(1, list.size), Suggestion(typed, Suggestion.Kind.TYPED))
                     }
                 }
-                emoji?.forWord(typed)?.let { e ->
+                // Loaded lazily on this thread the first time (reads the emoji catalogue once).
+                (if (wantEmoji) EmojiData.get(service) else null)?.forWord(typed)?.let { e ->
                     while (list.size > 2) list.removeAt(list.size - 1)
                     list.add(Suggestion(e, Suggestion.Kind.EMOJI))
                 }

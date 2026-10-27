@@ -137,7 +137,7 @@ fun HomeScreen(open: (String) -> Unit) {
     val app = SmartKeyboardApp.of(context)
     val setup = rememberSetupState()
     val langs by setting(Settings.LANGUAGES) { it.languages }
-    val aiOn by setting(Settings.AI_KEY) { it.aiEnabled }
+    val aiOn = app.settings.aiEnabled
     val theme by setting(Settings.THEME) { it.themeId }
     SettingsPage("Smart Keyboard", onBack = null) {
         item { Hero() }
