@@ -106,7 +106,8 @@ class Suggester(
         // ---- autocorrect decision ----
         var auto: Cand? = null
         if (mode != AutoCorrectMode.OFF && mayAutoCorrect(word, typedKey)) {
-            val costLimit = if (mode == AutoCorrectMode.CHILL) budget * 0.85f else budget
+            // Chill mode only fixes slips that are cheap to explain (about one or two small errors).
+            val costLimit = if (mode == AutoCorrectMode.CHILL) budget * 0.75f else budget
             val best = ranked.firstOrNull { it.key != typedKey && it.kind != Suggestion.Kind.COMPLETION && it.cost <= costLimit }
             val bestCompletion = ranked.firstOrNull { it.kind == Suggestion.Kind.COMPLETION }
             // Looks like a word in progress ("becau"): don't force a different word on it.

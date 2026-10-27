@@ -80,6 +80,17 @@ class LanguageManager(private val context: Context, private val store: LearningS
 
     fun runInBackground(task: () -> Unit) = executor.execute(task)
 
+    /** Re-reads learned data (after a backup import or reset) into the live lexicons. */
+    fun reloadUserData() {
+        val all = synchronized(lexicons) { lexicons.values.toList() }
+        for (lex in all) {
+            lex.listener = null
+            lex.resetMemory()
+            store.load(lex)
+            lex.listener = store
+        }
+    }
+
     companion object {
         private const val MAX_LOADED = 2
     }

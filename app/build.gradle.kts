@@ -62,7 +62,11 @@ android {
     }
 
     packaging {
-        resources.excludes += setOf("META-INF/{AL2.0,LGPL2.1}", "DebugProbesKt.bin")
+        resources.excludes += setOf(
+            "META-INF/{AL2.0,LGPL2.1}", "DebugProbesKt.bin", "META-INF/versions/9/module-info.class",
+            "META-INF/native-image/**", "META-INF/licenses/**", "META-INF/LICENSE*", "META-INF/NOTICE*",
+            "META-INF/DEPENDENCIES", "META-INF/INDEX.LIST",
+        )
     }
 
     testOptions {
@@ -91,6 +95,9 @@ dependencies {
     implementation(libs.androidx.activity.compose)
     implementation(libs.androidx.navigation.compose)
     implementation(libs.kotlinx.coroutines.android)
+    // Claude provider for the AI features (official SDK); align kotlin-reflect with our Kotlin.
+    implementation(libs.anthropic.java)
+    implementation(libs.kotlin.reflect)
 
     implementation(platform(libs.compose.bom))
     implementation(libs.compose.ui)

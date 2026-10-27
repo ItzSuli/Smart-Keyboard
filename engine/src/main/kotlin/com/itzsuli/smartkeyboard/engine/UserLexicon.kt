@@ -183,6 +183,12 @@ class UserLexicon(val lang: String) {
 
     // ---- bulk loading from storage (does not notify the listener) --------------------------
 
+    /** Empties the in-memory copy only (used before reloading from storage). */
+    @Synchronized fun resetMemory() {
+        words.clear(); bigrams.clear(); trigrams.clear(); followers.clear(); headCounts.clear(); pairFollowers.clear()
+        corrections.clear(); rejections.clear(); totalTokens = 0
+    }
+
     @Synchronized fun restoreWord(key: String, display: String, count: Int, lastUsed: Long, flags: Int) {
         words[key] = Word(key, display, count, lastUsed, flags)
         totalTokens += count
