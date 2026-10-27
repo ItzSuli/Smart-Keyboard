@@ -110,6 +110,12 @@ class Settings(context: Context) {
     val emojiKey get() = bool(EMOJI_KEY, true)
     val arabicDigits get() = bool(ARABIC_DIGITS, false)
     val clipboardHistory get() = bool(CLIPBOARD, true)
+    /** Mic button on the suggestion bar. */
+    val voiceKey get() = bool(VOICE_KEY, true)
+    /** Let the AI tidy up dictated text in the app's tone. */
+    val voiceAiFix get() = bool(VOICE_AI_FIX, true)
+    /** Use the phone's offline speech recogniser when it has one. */
+    val voiceOnDevice get() = bool(VOICE_ON_DEVICE, true)
     /** Your own shortcuts expand on space (otherwise they're offered as a suggestion). */
     val shortcutsAuto get() = bool(SHORTCUTS_AUTO, false)
 
@@ -153,9 +159,43 @@ class Settings(context: Context) {
     val aiAutoProof get() = enumValueOrDefault(str(AI_AUTO_PROOF, AiAutoProof.SUGGEST.name), AiAutoProof.SUGGEST)
     val aiSuggestions get() = bool(AI_SUGGESTIONS, true)
     val aiEnabled get() = bool(AI_ENABLED, true) && (aiApiKey.isNotBlank() || (aiProvider == "custom" && aiBaseUrl.isNotBlank()))
-    val aiTone get() = str(AI_TONE, "chill")
+    /** Default proofreading tone (and the tone everywhere when per-app tones are off). */
+    val aiTone get() = enumValueOrDefault(str(AI_TONE, AiTone.CHILL.name).uppercase(), AiTone.CHILL)
+    val tonePerApp get() = bool(TONE_PER_APP, true)
+
+    /** Tones the user picked for specific apps (package → tone). */
+    val toneOverrides: Map<String, AiTone> get() = str(TONE_APPS, "").split(';').mapNotNull { part ->
+        val eq = part.indexOf('=')
+        if (eq <= 0) null else part.substring(0, eq) to enumValueOrDefault(part.substring(eq + 1), AiTone.CHILL)
+    }.toMap()
+
+    fun setToneFor(pkg: String, tone: AiTone?) {
+        val map = toneOverrides.toMutableMap()
+        if (tone == null) map.remove(pkg) else map[pkg] = tone
+        set(TONE_APPS, map.entries.joinToString(";") { "${it.key}=${it.value.name}" })
+    }
+
+    /** The tone for text typed in [pkg]: the user's pick for that app, its automatic tone, or the default. */
+    fun toneFor(pkg: String?): AiTone {
+        if (!tonePerApp || pkg == null) return aiTone
+        return toneOverrides[pkg] ?: AppTones.automatic(pkg) ?: aiTone
+    }
+
+    /** Apps the keyboard was recently used in (most recent first), for the per-app tone list. */
+    val seenApps: List<String> get() = str(SEEN_APPS, "").split(',').filter { it.isNotBlank() }
+
+    fun noteApp(pkg: String) {
+        val list = seenApps
+        if (list.firstOrNull() == pkg) return
+        set(SEEN_APPS, (listOf(pkg) + list.filter { it != pkg }).take(40).joinToString(","))
+    }
 
     val onboardingDone get() = bool(ONBOARDING_DONE, false)
+
+    // ---- sync ----
+    val syncAuto get() = bool(SYNC_AUTO, true)
+    val syncLast get() = prefs.getLong(SYNC_LAST, 0L)
+    val syncError: String? get() = prefs.getString(SYNC_ERROR, null)
 
     companion object {
         const val THEME = "theme"
@@ -210,6 +250,9 @@ class Settings(context: Context) {
         const val ARABIZI = "arabizi"
         const val ARABIZI_AUTO = "arabizi_auto"
         const val SHORTCUTS_AUTO = "shortcuts_auto"
+        const val VOICE_KEY = "voice_key"
+        const val VOICE_AI_FIX = "voice_ai_fix"
+        const val VOICE_ON_DEVICE = "voice_on_device"
         /** Languages that share the Latin keyboard letters and can be mixed. */
         val LATIN_SCRIPT = setOf("en", "de", "fr", "es", "it", "pt", "tr", "nl", "pl")
         const val LEARNING = "learning"
@@ -222,7 +265,15 @@ class Settings(context: Context) {
         const val AI_SUGGESTIONS = "ai_suggestions"
         const val AI_ENABLED = "ai_enabled"
         const val AI_TONE = "ai_tone"
+        const val TONE_PER_APP = "tone_per_app"
+        const val TONE_APPS = "tone_apps"
+        const val SEEN_APPS = "seen_apps"
         const val ONBOARDING_DONE = "onboarding_done"
+        const val SYNC_URI = "sync_uri"
+        const val SYNC_SECRET = "sync_secret"
+        const val SYNC_AUTO = "sync_auto"
+        const val SYNC_LAST = "sync_last"
+        const val SYNC_ERROR = "sync_error"
         /** Bumped when a new background picture is saved. */
         const val BG_VERSION = "bg_version"
 

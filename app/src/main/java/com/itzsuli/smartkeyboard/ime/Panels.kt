@@ -149,7 +149,7 @@ class AiPanel(
         addView(scroll, LayoutParams(LayoutParams.MATCH_PARENT, 0, 1f))
     }
 
-    fun showActions(configured: Boolean) {
+    fun showActions(configured: Boolean, tone: String = "chill") {
         body.removeAllViews()
         if (!configured) {
             body.addView(note("Connect an AI provider to proofread and rewrite your messages. Google Gemini has a free tier."))
@@ -157,7 +157,7 @@ class AiPanel(
             return
         }
         body.addView(note("Works on the text you're typing (or the selected text)."))
-        body.addView(row(pill(context, "✨ Fix it (chill)", theme, accent = true) { listener.onAiProofread() }))
+        body.addView(row(pill(context, "✨ Fix it ($tone)", theme, accent = true) { listener.onAiProofread() }))
         body.addView(scrollRow(Prompts.Rewrite.entries.map { m -> pill(context, m.label, theme) { listener.onAiRewrite(m) } }))
         val targets = (languages + listOf("en", "de", "ar")).distinct()
         body.addView(scrollRow(targets.map { code -> pill(context, "→ ${Languages.get(code).nativeName}", theme) { listener.onAiTranslate(code) } }))
@@ -247,5 +247,82 @@ class AiPanel(
     private fun scrollRow(views: List<View>) = HorizontalScrollView(context).apply {
         isHorizontalScrollBarEnabled = false
         addView(row(*views.toTypedArray()))
+    }
+}
+
+/** Shown while dictating: a mic that pulses with your voice, the words so far, Done / Cancel. */
+@SuppressLint("ViewConstructor")
+class VoicePanel(
+    context: Context,
+    private val theme: KeyboardTheme,
+    languageName: String,
+    private val onMic: () -> Unit,
+    private val onDone: () -> Unit,
+    private val onCancel: () -> Unit,
+) : LinearLayout(context) {
+
+    private val mic = MicView(context, theme).apply { setOnClickListener { onMic() } }
+    private val status = TextView(context).apply {
+        gravity = Gravity.CENTER
+        setTextColor(theme.keyText)
+        setTextSize(TypedValue.COMPLEX_UNIT_SP, 17f)
+        maxLines = 3
+        ellipsize = TextUtils.TruncateAt.START
+        setPadding(context.dp(16f).toInt(), context.dp(6f).toInt(), context.dp(16f).toInt(), 0)
+    }
+
+    init {
+        orientation = VERTICAL
+        setBackgroundColor(theme.background)
+        addView(header(context, "🎤 $languageName", theme) { onCancel() })
+        addView(mic, LayoutParams(LayoutParams.MATCH_PARENT, 0, 1f))
+        addView(status, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT))
+        addView(LinearLayout(context).apply {
+            orientation = HORIZONTAL
+            gravity = Gravity.CENTER
+            setPadding(0, context.dp(8f).toInt(), 0, context.dp(10f).toInt())
+            addView(pill(context, "Cancel", theme) { onCancel() })
+            addView(View(context), LayoutParams(context.dp(12f).toInt(), 1))
+            addView(pill(context, "Done", theme, accent = true) { onDone() })
+        })
+        showListening()
+    }
+
+    fun showListening() { mic.active = true; status.text = "Listening… speak normally" }
+
+    fun showPartial(text: String) { mic.active = true; status.text = text }
+
+    fun showLevel(level: Float) { mic.level = level }
+
+    fun showWorking(text: String) { mic.active = false; status.text = text }
+
+    fun showError(message: String) { mic.active = false; status.text = "$message\nTap the mic to try again" }
+
+    /** The mic button, with rings that grow with the voice level. */
+    private class MicView(context: Context, private val theme: KeyboardTheme) : View(context) {
+        private val paint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG)
+        var active = true
+            set(value) { field = value; invalidate() }
+        var level = 0f
+            set(value) { field = field * 0.6f + value * 0.4f; invalidate() }
+
+        override fun onDraw(canvas: android.graphics.Canvas) {
+            val cx = width / 2f
+            val cy = height / 2f
+            val r = minOf(width, height) * 0.22f
+            if (active) {
+                val t = android.os.SystemClock.uptimeMillis() / 600.0
+                for (i in 0..1) {
+                    val grow = (1f + 0.35f * level + 0.12f * kotlin.math.sin(t + i * 1.6).toFloat()) * (1.25f + i * 0.3f)
+                    paint.color = Color.argb(if (i == 0) 60 else 30, Color.red(theme.accent), Color.green(theme.accent), Color.blue(theme.accent))
+                    canvas.drawCircle(cx, cy, r * grow, paint)
+                }
+                postInvalidateOnAnimation()
+            }
+            paint.color = if (active) theme.accent else theme.functionKey
+            canvas.drawCircle(cx, cy, r, paint)
+            paint.color = if (active) theme.actionText else theme.functionText
+            KeyIcons.draw(canvas, KeyIcons.Icon.MIC, cx, cy, r * 1.1f, paint)
+        }
     }
 }

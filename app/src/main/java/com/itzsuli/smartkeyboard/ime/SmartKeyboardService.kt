@@ -32,7 +32,7 @@ import java.io.File
 
 /** The keyboard itself. Builds the views and routes key events to [InputLogic]. */
 open class SmartKeyboardService : InputMethodService(), KeyboardView.Listener, SuggestionStripView.Listener,
-    SharedPreferences.OnSharedPreferenceChangeListener, AiPanel.Listener {
+    SharedPreferences.OnSharedPreferenceChangeListener, AiPanel.Listener, VoiceInput.Listener {
 
     private lateinit var app: SmartKeyboardApp
     private val settings: Settings get() = app.settings
@@ -56,6 +56,7 @@ open class SmartKeyboardService : InputMethodService(), KeyboardView.Listener, S
     private lateinit var haptics: Haptics
     private var audio: AudioManager? = null
     private val main = Handler(Looper.getMainLooper())
+    private var voice: VoiceInput? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -72,6 +73,7 @@ open class SmartKeyboardService : InputMethodService(), KeyboardView.Listener, S
     }
 
     override fun onDestroy() {
+        voice?.stop()
         settings.prefs.unregisterOnSharedPreferenceChangeListener(this)
         app.clipboard.stopListening()
         logic.shutdown()
@@ -163,6 +165,7 @@ open class SmartKeyboardService : InputMethodService(), KeyboardView.Listener, S
     private fun showKeyboard() {
         val host = panelHost ?: return
         val kv = keyboardView ?: return
+        if (panel is VoicePanel) voice?.stop()
         panel = null
         // Detach from wherever the keys are now before adding them again (a view can only
         // have one parent; getting this wrong crashed the app when settings changed).
@@ -204,6 +207,7 @@ open class SmartKeyboardService : InputMethodService(), KeyboardView.Listener, S
         updateShiftFromEditor()
         strip?.incognito = settings.incognito
         strip?.switchKey = settings.switchKey
+        strip?.voiceKey = settings.voiceKey
         strip?.aiAvailable = app.ai.isConfigured
         strip?.showAiChip(null)
         logic.refreshSuggestions()
@@ -211,6 +215,7 @@ open class SmartKeyboardService : InputMethodService(), KeyboardView.Listener, S
 
     override fun onFinishInputView(finishingInput: Boolean) {
         super.onFinishInputView(finishingInput)
+        voice?.stop()
         keyboardView?.cancelAll()
         if (panel != null) showKeyboard()
     }
@@ -218,6 +223,8 @@ open class SmartKeyboardService : InputMethodService(), KeyboardView.Listener, S
     override fun onFinishInput() {
         super.onFinishInput()
         logic.finishInput()
+        // Keeps learned words in step with your other phone (if sync is set up).
+        app.sync.maybeSyncInBackground()
     }
 
     override fun onUpdateSelection(oldSelStart: Int, oldSelEnd: Int, newSelStart: Int, newSelEnd: Int, candidatesStart: Int, candidatesEnd: Int) {
@@ -252,7 +259,10 @@ open class SmartKeyboardService : InputMethodService(), KeyboardView.Listener, S
             Settings.KEY_HEIGHT, Settings.NUMBER_ROW -> { rebuildLayout(); if (panel == null) showKeyboard() }
             Settings.EMOJI_KEY, Settings.SHOW_HINTS, Settings.ARABIC_DIGITS -> rebuildLayout()
             Settings.SWITCH_KEY -> strip?.switchKey = settings.switchKey
-            EMOJI_RECENTS -> Unit
+            Settings.VOICE_KEY -> strip?.voiceKey = settings.voiceKey
+            // Bookkeeping, nothing to redraw.
+            EMOJI_RECENTS, Settings.SEEN_APPS, Settings.TONE_APPS, Settings.TONE_PER_APP, Settings.AI_TONE,
+            Settings.SYNC_LAST, Settings.SYNC_ERROR, Settings.SYNC_URI, Settings.SYNC_SECRET, Settings.SYNC_AUTO -> Unit
             else -> when {
                 key?.startsWith("ai_") == true -> strip?.aiAvailable = app.ai.isConfigured
                 key in Settings.APPEARANCE -> {
@@ -475,6 +485,7 @@ open class SmartKeyboardService : InputMethodService(), KeyboardView.Listener, S
     override fun onToolbarAction(action: SuggestionStripView.ToolbarAction) {
         when (action) {
             SuggestionStripView.ToolbarAction.AI -> if (panel is AiPanel) showKeyboard() else openAi()
+            SuggestionStripView.ToolbarAction.VOICE -> if (panel is VoicePanel) showKeyboard() else openVoice()
             SuggestionStripView.ToolbarAction.CLIPBOARD -> openClipboard()
             SuggestionStripView.ToolbarAction.EMOJI -> openEmoji()
             SuggestionStripView.ToolbarAction.INCOGNITO -> {
@@ -517,6 +528,47 @@ open class SmartKeyboardService : InputMethodService(), KeyboardView.Listener, S
         showPanel(p)
     }
 
+    // ------------------------------------------------------------------ voice
+
+    private fun openVoice() {
+        val v = voice ?: VoiceInput(this, this).also { voice = it }
+        if (!v.hasPermission) {
+            // A keyboard can't ask for permissions itself: the settings app does it.
+            openSettings("voice")
+            return
+        }
+        if (!v.isAvailable) {
+            showStripMessage("No speech recognition on this phone")
+            return
+        }
+        val p = VoicePanel(this, theme, Languages.get(logic.lang).nativeName,
+            onMic = { startListening() }, onDone = { voice?.finish() }, onCancel = { showKeyboard() })
+        showPanel(p)
+        startListening()
+    }
+
+    private fun startListening() {
+        (panel as? VoicePanel)?.showListening()
+        voice?.start(VoiceInput.languageTag(logic.lang), settings.voiceOnDevice)
+    }
+
+    override fun onVoiceReady() { (panel as? VoicePanel)?.showListening() }
+
+    override fun onVoicePartial(text: String) { (panel as? VoicePanel)?.showPartial(text) }
+
+    override fun onVoiceLevel(level: Float) { (panel as? VoicePanel)?.showLevel(level) }
+
+    override fun onVoiceResult(text: String) {
+        if (panel !is VoicePanel) return
+        showKeyboard()
+        logic.onVoiceText(text)
+    }
+
+    override fun onVoiceError(message: String) {
+        val p = panel as? VoicePanel
+        if (p != null) p.showError(message) else showStripMessage(message)
+    }
+
     private fun openClipboard() {
         showPanel(ClipboardPanel(this, app.clipboard, theme, onPaste = { logic.onPaste(it) }, onClose = { showKeyboard() }))
     }
@@ -525,7 +577,7 @@ open class SmartKeyboardService : InputMethodService(), KeyboardView.Listener, S
 
     private fun openAi() {
         val p = AiPanel(this, theme, settings.languages, this)
-        p.showActions(app.ai.isConfigured && !logic.isPassword)
+        p.showActions(app.ai.isConfigured && !logic.isPassword, logic.tone.label.lowercase())
         showPanel(p)
     }
 
@@ -546,7 +598,7 @@ open class SmartKeyboardService : InputMethodService(), KeyboardView.Listener, S
         }
     }
 
-    override fun onAiProofread() = runAi("Fixing") { t, cb -> app.ai.proofread(t, logic.activeLanguages, cb) }
+    override fun onAiProofread() = runAi("Fixing") { t, cb -> app.ai.proofread(t, logic.activeLanguages, logic.tone, cb) }
 
     override fun onAiRewrite(mode: Prompts.Rewrite) = runAi("Rewriting") { t, cb -> app.ai.rewrite(t, mode, logic.activeLanguages, cb) }
 

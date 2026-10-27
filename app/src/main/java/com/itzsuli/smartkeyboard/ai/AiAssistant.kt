@@ -4,6 +4,7 @@ import android.content.Context
 import android.os.Handler
 import android.os.Looper
 import com.itzsuli.smartkeyboard.SmartKeyboardApp
+import com.itzsuli.smartkeyboard.data.AiTone
 import com.itzsuli.smartkeyboard.data.Languages
 import com.itzsuli.smartkeyboard.data.Settings
 import com.itzsuli.smartkeyboard.engine.TextDiff
@@ -55,8 +56,8 @@ class AiAssistant(private val context: Context, private val settings: Settings) 
         }
     }
 
-    fun proofread(text: String, langs: List<String>, onResult: (Result<String>) -> Unit) = run({
-        val out = provider().complete(Prompts.proofread(languageName(langs), slangFor(langs)), Prompts.wrap(text), maxTokensFor(text), fast = false)
+    fun proofread(text: String, langs: List<String>, tone: AiTone = settings.aiTone, onResult: (Result<String>) -> Unit) = run({
+        val out = provider().complete(Prompts.proofread(languageName(langs), slangFor(langs), tone), Prompts.wrap(text), maxTokensFor(text), fast = false)
         Prompts.clean(out).ifEmpty { text }
     }, onResult)
 

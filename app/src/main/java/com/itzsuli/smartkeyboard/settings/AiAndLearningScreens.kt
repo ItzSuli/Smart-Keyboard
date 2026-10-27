@@ -23,6 +23,8 @@ import androidx.compose.material.icons.rounded.Delete
 import androidx.compose.material.icons.rounded.FileDownload
 import androidx.compose.material.icons.rounded.FileUpload
 import androidx.compose.material.icons.rounded.RestartAlt
+import androidx.compose.material.icons.rounded.Sync
+import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material.icons.rounded.Undo
 import androidx.compose.material.icons.rounded.Visibility
 import androidx.compose.material.icons.rounded.VisibilityOff
@@ -65,6 +67,7 @@ import com.itzsuli.smartkeyboard.SmartKeyboardApp
 import com.itzsuli.smartkeyboard.ai.ProviderPreset
 import com.itzsuli.smartkeyboard.data.AiAutoProof
 import com.itzsuli.smartkeyboard.data.Languages
+import com.itzsuli.smartkeyboard.data.AiTone
 import com.itzsuli.smartkeyboard.data.Settings
 import com.itzsuli.smartkeyboard.engine.TextUtils
 import com.itzsuli.smartkeyboard.engine.UserLexicon
@@ -74,12 +77,14 @@ import kotlinx.coroutines.withContext
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun AiScreen(onBack: () -> Unit) {
+fun AiScreen(onBack: () -> Unit, open: (String) -> Unit = {}) {
     val context = LocalContext.current
     val app = SmartKeyboardApp.of(context)
     val s = app.settings
     val providerId by setting(Settings.AI_PROVIDER) { it.aiProvider }
     val autoProof by setting(Settings.AI_AUTO_PROOF) { it.aiAutoProof }
+    val tone by setting(Settings.AI_TONE) { it.aiTone }
+    val tonePerApp by setting(Settings.TONE_PER_APP) { it.tonePerApp }
     val preset = ProviderPreset.of(providerId)
     var key by remember(providerId) { mutableStateOf(s.aiApiKey) }
     var model by remember(providerId) { mutableStateOf(s.aiModel.ifBlank { preset.defaultModel }) }
@@ -192,11 +197,21 @@ fun AiScreen(onBack: () -> Unit) {
                 SwitchSetting(Settings.AI_SUGGESTIONS, "AI word suggestions", "Adds context-aware next-word ideas (sends the text before the cursor after each word)") { it.aiSuggestions }
             }
         }
+        item {
+            Group("Tone") {
+                ChoiceSetting(
+                    "Default tone", tone.description,
+                    AiTone.entries.map { it to it.label }, tone,
+                ) { s.set(Settings.AI_TONE, it) }
+                SwitchSetting(Settings.TONE_PER_APP, "Tone per app", "Chill in WhatsApp & Snapchat, clean in Slack & Teams, polite in Gmail & Outlook — automatically") { it.tonePerApp }
+                if (tonePerApp) NavRow("Choose per app", "Change the tone for any app", Icons.Rounded.Tune) { open("tones") }
+            }
+        }
     }
 }
 
 @Composable
-fun LearningScreen(onBack: () -> Unit) {
+fun LearningScreen(onBack: () -> Unit, open: (String) -> Unit = {}) {
     val context = LocalContext.current
     val app = SmartKeyboardApp.of(context)
     val s = app.settings
@@ -319,7 +334,8 @@ fun LearningScreen(onBack: () -> Unit) {
             }
         }
         item {
-            Group("Backup") {
+            Group("Backup & sync") {
+                NavRow("Sync between phones", "End-to-end encrypted, through a file in Google Drive or any folder", Icons.Rounded.Sync) { open("sync") }
                 Hint("Moving to a new phone or reinstalling? Save your learned words and restore them later.")
                 Row(Modifier.padding(12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Button(onClick = { exporter.launch("smart-keyboard-backup.json") }) { Icon(Icons.Rounded.FileDownload, null); Text(" Export") }

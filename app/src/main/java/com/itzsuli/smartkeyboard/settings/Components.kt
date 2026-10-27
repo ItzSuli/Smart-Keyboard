@@ -191,7 +191,7 @@ fun SliderSetting(key: String, title: String, range: IntRange, step: Int = 1, fo
 @Composable
 fun <T> ChoiceSetting(title: String, subtitle: String? = null, options: List<Pair<T, String>>, selected: T, onSelect: (T) -> Unit) {
     Column(Modifier.padding(horizontal = 16.dp, vertical = 10.dp)) {
-        Text(title, style = MaterialTheme.typography.bodyLarge)
+        if (title.isNotEmpty()) Text(title, style = MaterialTheme.typography.bodyLarge)
         if (subtitle != null) Text(subtitle, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
         Spacer(Modifier.size(8.dp))
         SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {

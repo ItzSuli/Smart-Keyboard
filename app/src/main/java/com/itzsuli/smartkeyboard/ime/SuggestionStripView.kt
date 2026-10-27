@@ -32,7 +32,7 @@ class SuggestionStripView(context: Context) : View(context) {
         fun onSwitchKeyboard(longPress: Boolean)
     }
 
-    enum class ToolbarAction { AI, CLIPBOARD, EMOJI, INCOGNITO, SETTINGS, HIDE }
+    enum class ToolbarAction { AI, VOICE, CLIPBOARD, EMOJI, INCOGNITO, SETTINGS, HIDE }
 
     var listener: Listener? = null
     var theme: KeyboardTheme = KeyboardTheme.DARK
@@ -44,6 +44,10 @@ class SuggestionStripView(context: Context) : View(context) {
     /** Shows the switch-keyboard button at the right end of the bar. */
     var switchKey = true
         set(value) { field = value; invalidate() }
+    /** Shows the voice-typing mic next to it. */
+    var voiceKey = true
+        set(value) { field = value; invalidate() }
+    private val micButton = RectF()
     var aiBusy = false
         set(value) { field = value; invalidate(); if (value) postInvalidateOnAnimation() }
 
@@ -135,6 +139,14 @@ class SuggestionStripView(context: Context) : View(context) {
         } else {
             switchButton.setEmpty()
         }
+        if (voiceKey) {
+            micButton.set(right - btn, (h - btn) / 2, right, (h + btn) / 2)
+            iconPaint.color = withAlpha(theme.stripText, 190)
+            KeyIcons.draw(canvas, KeyIcons.Icon.MIC, micButton.centerX(), micButton.centerY(), btn * 0.58f, iconPaint)
+            right = micButton.left - 2 * density
+        } else {
+            micButton.setEmpty()
+        }
 
         val left = aiButton.right + 4 * density
         val w = right
@@ -219,7 +231,10 @@ class SuggestionStripView(context: Context) : View(context) {
 
     private fun drawToolbar(canvas: Canvas, left: Float, right: Float) {
         toolbarActions.clear()
-        val actions = listOf(ToolbarAction.CLIPBOARD, ToolbarAction.EMOJI, ToolbarAction.INCOGNITO, ToolbarAction.SETTINGS, ToolbarAction.HIDE)
+        val actions = listOfNotNull(
+            if (voiceKey) null else ToolbarAction.VOICE,
+            ToolbarAction.CLIPBOARD, ToolbarAction.EMOJI, ToolbarAction.INCOGNITO, ToolbarAction.SETTINGS, ToolbarAction.HIDE,
+        )
         val h = height.toFloat()
         val cell = (right - left) / actions.size
         for ((i, a) in actions.withIndex()) {
@@ -238,6 +253,7 @@ class SuggestionStripView(context: Context) : View(context) {
                 ToolbarAction.SETTINGS -> KeyIcons.Icon.SETTINGS
                 ToolbarAction.HIDE -> KeyIcons.Icon.KEYBOARD_HIDE
                 ToolbarAction.AI -> KeyIcons.Icon.SPARKLE
+                ToolbarAction.VOICE -> KeyIcons.Icon.MIC
             }
             KeyIcons.draw(canvas, icon, r.centerX(), r.centerY(), h * 0.46f, iconPaint)
         }
@@ -278,6 +294,7 @@ class SuggestionStripView(context: Context) : View(context) {
                 val y = e.y
                 when {
                     aiButton.contains(x, y) || (x < aiButton.right + 4 * density) -> listener?.onToolbarAction(ToolbarAction.AI)
+                    !micButton.isEmpty && x >= micButton.left - 2 * density && x <= micButton.right + 2 * density -> listener?.onToolbarAction(ToolbarAction.VOICE)
                     message != null -> { message = null; invalidate() }
                     aiChip != null -> if (chipClose.contains(x, y)) listener?.onAiChipDismissed() else listener?.onAiChipTapped()
                     slot >= 0 && slots[slot].contains(x, y) -> {

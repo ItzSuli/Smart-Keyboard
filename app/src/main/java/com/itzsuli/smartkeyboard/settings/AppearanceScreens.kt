@@ -27,6 +27,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.Mic
+import androidx.compose.material.icons.automirrored.rounded.ShortText
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
@@ -246,7 +248,7 @@ private fun saveBackground(context: android.content.Context, uri: Uri): Boolean 
 }.getOrDefault(false)
 
 @Composable
-fun TypingScreen(onBack: () -> Unit) {
+fun TypingScreen(onBack: () -> Unit, open: (String) -> Unit = {}) {
     val s = settings()
     val mode by setting(Settings.AUTOCORRECT) { it.autoCorrectMode }
     val hitbox by setting(Settings.ADAPTIVE_HITBOX) { it.adaptiveHitbox }
@@ -293,6 +295,8 @@ fun TypingScreen(onBack: () -> Unit) {
         }
         item {
             Group("Gestures & keys") {
+                NavRow("Your shortcuts", "Only the ones you add — offered or expanded as you type", Icons.AutoMirrored.Rounded.ShortText) { open("shortcuts") }
+                NavRow("Voice typing", "Mic on the suggestion bar, AI tidy-up", Icons.Rounded.Mic) { open("voice") }
                 SwitchSetting(Settings.SWITCH_KEY, "Switch-keyboard button", "Button on the right of the suggestion bar: tap to pick another keyboard app, hold to jump to the next one") { it.switchKey }
                 SwitchSetting(Settings.SPACE_CURSOR, "Slide on space bar to move the cursor") { it.spaceCursor }
                 SwitchSetting(Settings.DELETE_SWIPE, "Swipe left from ⌫ to delete words") { it.deleteSwipe }
@@ -386,6 +390,10 @@ fun LanguagesScreen(onBack: () -> Unit) {
         }
         if ("ar" in enabled) item {
             Group("Arabic") {
+                SwitchSetting(Settings.ARABIZI, "Arabizi", "On the English (or any Latin) keyboard, “7abibi”, “3arabi” or “2albi” become حبيبي, عربي, قلبي") { it.arabizi }
+                SwitchSetting(Settings.ARABIZI_AUTO, "Convert on space",
+                    "Words with Arabizi numbers (3, 7, 5, 2…) and words right after Arabic are converted automatically — backspace undoes it. Other words get an Arabic suggestion.") { it.arabiziAuto }
+                Hint("Tip: turn on the number row (Appearance → Keys) for quick 3, 5, 7 and 2.")
                 SwitchSetting(Settings.ARABIC_DIGITS, "Arabic-Indic digits (١٢٣)") { it.arabicDigits }
             }
         }

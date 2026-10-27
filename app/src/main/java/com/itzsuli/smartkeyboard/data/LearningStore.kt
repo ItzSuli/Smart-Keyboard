@@ -164,13 +164,17 @@ class LearningStore(context: Context) : UserLexicon.Listener {
 
     fun stat(name: String): Long = getValue("stat.$name")?.toLongOrNull() ?: 0
 
-    // ---- backup ----
+    // ---- backup & sync ----
 
-    fun exportJson(): String {
+    /**
+     * Everything learned as JSON. [forSync] leaves out what belongs to this phone only (where
+     * the finger lands on this screen, adaptive-key tuning).
+     */
+    fun exportJson(forSync: Boolean = false): String {
         flush()
         val db = helper.readableDatabase
         val root = JSONObject().put("format", "smart-keyboard-learning").put("version", 1)
-        for (table in listOf("words", "ngrams", "corrections", "rejections", "kv")) {
+        for (table in TABLES) {
             val rows = JSONArray()
             db.rawQuery("SELECT * FROM $table", null).use { c ->
                 while (c.moveToNext()) {
@@ -181,6 +185,7 @@ class LearningStore(context: Context) : UserLexicon.Listener {
                             else -> row.put(c.getColumnName(i), c.getString(i))
                         }
                     }
+                    if (forSync && table == "kv" && isDeviceOnly(row.optString("key"))) continue
                     rows.put(row)
                 }
             }
@@ -189,7 +194,12 @@ class LearningStore(context: Context) : UserLexicon.Listener {
         return root.toString()
     }
 
-    /** Merges a backup into the database. Returns the number of rows imported. */
+    /**
+     * Merges a backup (or another phone's data) into the database without losing anything:
+     * counts take the higher value, flags (confirmed, blocked...) are combined, your own
+     * shortcuts are joined, and this phone's touch data is kept. Merging the same data twice
+     * changes nothing. Returns the number of rows merged.
+     */
     fun importJson(json: String): Int {
         val root = JSONObject(json)
         require(root.optString("format") == "smart-keyboard-learning") { "Not a Smart Keyboard backup" }
@@ -198,20 +208,44 @@ class LearningStore(context: Context) : UserLexicon.Listener {
         var n = 0
         db.beginTransaction()
         try {
-            for (table in listOf("words", "ngrams", "corrections", "rejections", "kv")) {
-                val rows = root.optJSONArray(table) ?: continue
-                for (i in 0 until rows.length()) {
-                    val row = rows.getJSONObject(i)
-                    val values = ContentValues()
-                    for (k in row.keys()) {
-                        when (val v = row.get(k)) {
-                            is Number -> values.put(k, v.toLong())
-                            else -> values.put(k, v.toString())
-                        }
-                    }
-                    db.insertWithOnConflict(table, null, values, SQLiteDatabase.CONFLICT_REPLACE)
-                    n++
+            root.optJSONArray("words")?.forEachRow { r ->
+                val lang = r.getString("lang"); val key = r.getString("key")
+                val local = db.rawQuery("SELECT display, count, last_used, flags FROM words WHERE lang=? AND key=?", arrayOf(lang, key)).use { c ->
+                    if (c.moveToFirst()) arrayOf<Any>(c.getString(0), c.getInt(1), c.getLong(2), c.getInt(3)) else null
                 }
+                val count = r.optInt("count"); val last = r.optLong("last_used"); val flags = r.optInt("flags")
+                db.insertWithOnConflict("words", null, ContentValues().apply {
+                    put("lang", lang); put("key", key)
+                    if (local == null) {
+                        put("display", r.optString("display", key)); put("count", count); put("last_used", last); put("flags", flags)
+                    } else {
+                        val newer = last > (local[2] as Long)
+                        put("display", if (newer) r.optString("display", key) else local[0] as String)
+                        put("count", maxOf(count, local[1] as Int)); put("last_used", maxOf(last, local[2] as Long))
+                        put("flags", flags or (local[3] as Int))
+                    }
+                }, SQLiteDatabase.CONFLICT_REPLACE)
+                n++
+            }
+            root.optJSONArray("ngrams")?.forEachRow { r ->
+                mergeCount(db, "ngrams", arrayOf("lang", "ngram"), arrayOf(r.getString("lang"), r.getString("ngram")), r.optInt("count")); n++
+            }
+            for (table in listOf("corrections", "rejections")) root.optJSONArray(table)?.forEachRow { r ->
+                mergeCount(db, table, arrayOf("lang", "typed", "target"), arrayOf(r.getString("lang"), r.getString("typed"), r.getString("target")), r.optInt("count")); n++
+            }
+            root.optJSONArray("kv")?.forEachRow { r ->
+                val key = r.getString("key")
+                val value = r.optString("value")
+                if (isDeviceOnly(key)) return@forEachRow
+                val local = db.rawQuery("SELECT value FROM kv WHERE key=?", arrayOf(key)).use { c -> if (c.moveToFirst()) c.getString(0) else null }
+                val merged = when {
+                    local == null -> value
+                    key.startsWith("stat.") -> maxOf(local.toLongOrNull() ?: 0, value.toLongOrNull() ?: 0).toString()
+                    key == Shortcuts.KEY -> mergeShortcuts(local, value)
+                    else -> local
+                }
+                if (merged != local) db.insertWithOnConflict("kv", null, ContentValues().apply { put("key", key); put("value", merged) }, SQLiteDatabase.CONFLICT_REPLACE)
+                n++
             }
             db.setTransactionSuccessful()
         } finally {
@@ -219,6 +253,32 @@ class LearningStore(context: Context) : UserLexicon.Listener {
         }
         return n
     }
+
+    private inline fun JSONArray.forEachRow(action: (JSONObject) -> Unit) { for (i in 0 until length()) action(getJSONObject(i)) }
+
+    private fun mergeCount(db: SQLiteDatabase, table: String, keys: Array<String>, values: Array<String>, count: Int) {
+        val where = keys.joinToString(" AND ") { "$it=?" }
+        val local = db.rawQuery("SELECT count FROM $table WHERE $where", values).use { c -> if (c.moveToFirst()) c.getInt(0) else -1 }
+        if (local >= count) return
+        db.insertWithOnConflict(table, null, ContentValues().apply {
+            keys.forEachIndexed { i, k -> put(k, values[i]) }
+            put("count", count)
+        }, SQLiteDatabase.CONFLICT_REPLACE)
+    }
+
+    /** Your shortcuts from both sides; for the same shortcut, this phone's text wins. */
+    private fun mergeShortcuts(local: String, remote: String): String = runCatching {
+        val out = JSONArray(local)
+        val have = (0 until out.length()).map { out.getJSONObject(it).optString("short").lowercase() }.toHashSet()
+        val other = JSONArray(remote)
+        for (i in 0 until other.length()) {
+            val o = other.getJSONObject(i)
+            if (have.add(o.optString("short").lowercase())) out.put(o)
+        }
+        out.toString()
+    }.getOrDefault(local)
+
+    private fun isDeviceOnly(key: String) = key.startsWith("touch.") || key.startsWith("hitbox.")
 
     fun clearAll() {
         synchronized(pending) { pending.clear() }
@@ -230,6 +290,7 @@ class LearningStore(context: Context) : UserLexicon.Listener {
     }
 
     companion object {
+        private val TABLES = listOf("words", "ngrams", "corrections", "rejections", "kv")
         private const val FLUSH_DELAY_MS = 2500L
         private const val MAX_NGRAMS = 80_000
     }

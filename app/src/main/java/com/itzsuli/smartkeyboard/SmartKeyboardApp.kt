@@ -8,6 +8,7 @@ import com.itzsuli.smartkeyboard.data.LanguageManager
 import com.itzsuli.smartkeyboard.data.LearningStore
 import com.itzsuli.smartkeyboard.data.Settings
 import com.itzsuli.smartkeyboard.data.Shortcuts
+import com.itzsuli.smartkeyboard.data.SyncManager
 
 /** Process-wide singletons shared by the keyboard service and the settings app. */
 class SmartKeyboardApp : Application() {
@@ -17,6 +18,7 @@ class SmartKeyboardApp : Application() {
     val ai by lazy { AiAssistant(this, settings) }
     val clipboard by lazy { ClipboardHistory(this) }
     val shortcuts by lazy { Shortcuts(store) }
+    val sync by lazy { SyncManager(this, settings) }
 
     companion object {
         fun of(context: Context): SmartKeyboardApp = context.applicationContext as SmartKeyboardApp

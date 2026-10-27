@@ -25,6 +25,7 @@ import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.Keyboard
+import androidx.compose.material.icons.rounded.Mic
 import androidx.compose.material.icons.rounded.Palette
 import androidx.compose.material.icons.rounded.Psychology
 import androidx.compose.material.icons.rounded.RadioButtonUnchecked
@@ -95,11 +96,15 @@ fun SettingsApp(section: String?, onSectionHandled: () -> Unit) {
     NavHost(nav, startDestination = "home") {
         composable("home") { HomeScreen { nav.navigate(it) } }
         composable("appearance") { AppearanceScreen(back) }
-        composable("typing") { TypingScreen(back) }
+        composable("typing") { TypingScreen(back) { nav.navigate(it) } }
         composable("languages") { LanguagesScreen(back) }
-        composable("ai") { AiScreen(back) }
-        composable("learning") { LearningScreen(back) }
+        composable("ai") { AiScreen(back) { nav.navigate(it) } }
+        composable("learning") { LearningScreen(back) { nav.navigate(it) } }
         composable("about") { AboutScreen(back) }
+        composable("voice") { VoiceScreen(back) }
+        composable("shortcuts") { ShortcutsScreen(back) }
+        composable("tones") { AppTonesScreen(back) }
+        composable("sync") { SyncScreen(back) }
     }
 }
 
@@ -171,6 +176,8 @@ fun HomeScreen(open: (String) -> Unit) {
                 Divider()
                 NavRow("AI assistant", if (aiOn) "Connected — proofreading & smart suggestions" else "Set up AI proofreading (free options)", Icons.Rounded.AutoAwesome) { open("ai") }
                 Divider()
+                NavRow("Voice typing", "Speak, and it's proofread the chill way", Icons.Rounded.Mic) { open("voice") }
+                Divider()
                 NavRow("Your words & learning", "What the keyboard learned from you", Icons.Rounded.Psychology) { open("learning") }
                 Divider()
                 NavRow("About & privacy", null, Icons.Rounded.Info) { open("about") }
@@ -193,6 +200,7 @@ fun HomeScreen(open: (String) -> Unit) {
 private fun themeName(id: String) = when (id) {
     "auto" -> "Auto"
     "dynamic" -> "Material You"
+    "custom" -> "Your colours"
     else -> com.itzsuli.smartkeyboard.ime.KeyboardTheme.PRESETS.firstOrNull { it.id == id }?.name ?: id
 }
 

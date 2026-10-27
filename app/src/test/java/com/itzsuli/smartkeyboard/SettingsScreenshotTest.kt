@@ -22,7 +22,7 @@ import java.io.File
 class SettingsScreenshotTest {
     @Test fun rendersSettingsScreens() {
         val out = File("build/screenshots").apply { mkdirs() }
-        for (section in listOf("home", "appearance", "typing", "languages", "ai", "learning", "about")) {
+        for (section in listOf("home", "appearance", "typing", "languages", "ai", "learning", "about", "voice", "shortcuts", "tones", "sync")) {
             val intent = Intent(org.robolectric.RuntimeEnvironment.getApplication(), MainActivity::class.java)
             if (section != "home") intent.putExtra(MainActivity.EXTRA_SECTION, section)
             val controller = Robolectric.buildActivity(MainActivity::class.java, intent).setup()
@@ -30,7 +30,7 @@ class SettingsScreenshotTest {
             val root: View = controller.get().window.decorView
             // Phone-sized for the docs, plus a very tall one that shows every option at once.
             for ((suffix, height) in listOf("" to 2673, "_full" to 9000)) {
-                if (suffix.isNotEmpty() && section !in setOf("appearance", "typing")) continue
+                if (suffix.isNotEmpty() && section !in setOf("appearance", "typing", "ai", "languages")) continue
                 root.measure(View.MeasureSpec.makeMeasureSpec(1233, View.MeasureSpec.EXACTLY), View.MeasureSpec.makeMeasureSpec(height, View.MeasureSpec.EXACTLY))
                 root.layout(0, 0, 1233, height)
                 repeat(5) { shadowOf(Looper.getMainLooper()).idle(); Thread.sleep(30) }

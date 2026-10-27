@@ -464,6 +464,58 @@ class KeyboardServiceTest {
         }
     }
 
+    private fun useFakeAi(fake: FakeHttpServer) {
+        val s = (org.robolectric.RuntimeEnvironment.getApplication() as SmartKeyboardApp).settings
+        s.set(Settings.AI_PROVIDER, "custom")
+        s.set(Settings.AI_BASE_URL, fake.baseUrl + "/v1")
+        s.set(Settings.AI_MODEL, "test-model")
+        s.set("${Settings.AI_KEY}_custom", "k")
+        s.set(Settings.AI_SUGGESTIONS, false)
+    }
+
+    /** Starts a field in [pkg], as if the user switched to that app. */
+    private fun startIn(pkg: String) {
+        val type = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
+        edit.inputType = type
+        val info = EditorInfo().apply { inputType = type; packageName = pkg; initialSelStart = edit.selectionStart; initialSelEnd = edit.selectionEnd }
+        service.testIc = edit.onCreateInputConnection(EditorInfo())
+        service.testInfo = info
+        service.onStartInput(info, false)
+        service.onStartInputView(info, false)
+        layout()
+    }
+
+    @Test fun voiceIsProofreadInTheAppsTone() {
+        FakeHttpServer().use { fake ->
+            fake.reply = """{"choices":[{"message":{"role":"assistant","content":"Could you send me the report, please?"}}]}"""
+            useFakeAi(fake)
+            // Gmail: polite.
+            startIn("com.google.android.gm")
+            service.logic.onVoiceText("could u send me the report pls")
+            sync()
+            waitUntil { fake.requests > 0 && text.startsWith("Could you send") }
+            assertEquals("Could you send me the report, please? ", text)
+            assertTrue(fake.lastBody, fake.lastBody.contains("email"))
+            // The fix can be undone from the chip.
+            service.onAiChipTapped(); sync()
+            assertEquals("Could u send me the report pls ", text)
+        }
+    }
+
+    @Test fun chatAppsGetTheChillTone() {
+        FakeHttpServer().use { fake ->
+            fake.reply = """{"choices":[{"message":{"role":"assistant","content":"yo wanna grab food later"}}]}"""
+            useFakeAi(fake)
+            startIn("com.whatsapp")
+            service.logic.onVoiceText("yo wanna grab food latr")
+            sync()
+            waitUntil { fake.requests > 0 }
+            Thread.sleep(200); idle()
+            assertTrue(fake.lastBody, fake.lastBody.contains("Keep it chill"))
+            assertTrue(fake.lastBody, !fake.lastBody.contains("email"))
+        }
+    }
+
     @Test fun rendersKeyboardScreenshots() {
         val out = File("build/screenshots").apply { mkdirs() }
         fun shot(name: String) {
@@ -511,6 +563,16 @@ class KeyboardServiceTest {
         service.showAiChip("✨ Me and him go there tomorrow.")
         shot("ai_chip")
         service.showAiChip(null)
+        // The voice panel, drawn on its own (the real one needs the microphone).
+        run {
+            val panel = com.itzsuli.smartkeyboard.ime.VoicePanel(activity, com.itzsuli.smartkeyboard.ime.KeyboardTheme.DARK, "English", {}, {}, {})
+            panel.showPartial("hey are you coming tonight")
+            panel.measure(View.MeasureSpec.makeMeasureSpec(1233, View.MeasureSpec.EXACTLY), View.MeasureSpec.makeMeasureSpec(780, View.MeasureSpec.EXACTLY))
+            panel.layout(0, 0, 1233, 780)
+            val bmp = Bitmap.createBitmap(1233, 780, Bitmap.Config.ARGB_8888)
+            panel.draw(Canvas(bmp))
+            File(out, "voice.png").outputStream().use { bmp.compress(Bitmap.CompressFormat.PNG, 100, it) }
+        }
         service.onToolbarAction(com.itzsuli.smartkeyboard.ime.SuggestionStripView.ToolbarAction.EMOJI)
         repeat(5) { idle(); Thread.sleep(30) }
         shot("emoji")

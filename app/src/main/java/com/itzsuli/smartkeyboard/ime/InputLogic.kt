@@ -55,6 +55,9 @@ class InputLogic(private val service: SmartKeyboardService) {
     private var allowAutocorrect = true
     private var allowAi = true
     var isPassword = false; private set
+    /** The app being typed in, and the AI tone that goes with it (chill in chats, polite in email...). */
+    private var appPackage: String? = null
+    val tone: com.itzsuli.smartkeyboard.data.AiTone get() = settings.toneFor(appPackage)
 
     // ---- engine ----
     /**
@@ -154,6 +157,10 @@ class InputLogic(private val service: SmartKeyboardService) {
         allowLearning = allowSuggestions && settings.learning && !settings.incognito && !noPersonalLearning
         allowAutocorrect = allowSuggestions && !webOrEmail && settings.autoCorrectMode != AutoCorrectMode.OFF
         allowAi = allowSuggestions && !webOrEmail && !settings.incognito && !noPersonalLearning
+        appPackage = info.packageName
+        info.packageName?.let { pkg ->
+            if (pkg != service.packageName && !isPassword && allowLearning) settings.noteApp(pkg)
+        }
         cursor = info.initialSelStart
         pendingCursors.clear()
         setLanguage(settings.currentLanguage)
@@ -1010,6 +1017,42 @@ class InputLogic(private val service: SmartKeyboardService) {
         refreshSuggestions()
     }
 
+    // ------------------------------------------------------------------ voice
+
+    /**
+     * Dictated text: inserted with the right spacing and capitals, then proofread by the AI in
+     * this app's tone (chill in chats, polite in email) when one is set up. The AI's fix can be
+     * undone from the chip, like an automatic proofread.
+     */
+    fun onVoiceText(spoken: String) {
+        val conn = ic ?: return
+        var text = spoken.trim()
+        if (text.isEmpty()) return
+        aiUndo = null
+        conn.beginBatchEdit()
+        if (composing.isNotEmpty()) commitComposing(autocorrect = false, separator = "")
+        val before = textBefore(1).toString()
+        val needsSpace = before.isNotEmpty() && !before[0].isWhitespace() && before[0] !in "([{\"'“«"
+        if (service.shiftState != KeyboardView.ShiftState.OFF) text = TextUtils.capitalize(text, lang)
+        commit((if (needsSpace) " " else "") + text + " ")
+        conn.endBatchEdit()
+        autoSpaced = true
+        lastCorrection = null
+        service.afterSeparator()
+        refreshSuggestions()
+        if (!(settings.voiceAiFix && allowAi && app.ai.isConfigured) || text.count { it == ' ' } < 1) return
+        app.ai.proofread(text, activeLanguages, tone) { res ->
+            val fixed = res.getOrNull()?.trim()
+            if (fixed.isNullOrBlank() || fixed == text) return@proofread
+            // Only if nothing was typed since.
+            if (textBefore(text.length + 1).toString() != "$text ") return@proofread
+            replaceBeforeCursor("$text ", "$fixed ")
+            aiUndo = Triple(fixed, text, " ")
+            learnFromAi(text, fixed)
+            service.showAiChip("Fixed by AI · tap to undo")
+        }
+    }
+
     // ------------------------------------------------------------------ AI
 
     /** Text the AI panel works on: the selection, or the whole field if it is short enough. */
@@ -1073,7 +1116,7 @@ class InputLogic(private val service: SmartKeyboardService) {
         val sentence = body.substring(start).trimStart()
         if (sentence.split(' ').count { it.isNotBlank() } < 3 || sentence.length > 400) return
         proofInFlight = true
-        app.ai.proofread(sentence, activeLanguages) { res ->
+        app.ai.proofread(sentence, activeLanguages, tone) { res ->
             proofInFlight = false
             val fixed = res.getOrNull() ?: return@proofread
             if (fixed == sentence || fixed.isBlank()) return@proofread
