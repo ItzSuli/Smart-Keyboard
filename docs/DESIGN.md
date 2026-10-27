@@ -29,6 +29,11 @@
 | Enter key | Same rules as the stock Android keyboard (LatinIME): perform the app's action (Send, Search, Go…) unless the app sets `IME_FLAG_NO_ENTER_ACTION` or the action is NONE; an app's custom label uses its `actionId`. Multi-line chat boxes (Snapchat, WhatsApp) therefore send. Long-press enter types a new line. |
 | Haptics | Composition primitives (CLICK/TICK, scaled by the strength slider) where the vibrator supports them, the phone's predefined click effects otherwise, short amplitude pulses on old phones; held delete and cursor moves use lighter ticks, one per actual change. |
 | Mixed typing | Several Latin-script languages on one keyboard. Each language keeps its own model and user lexicon; a `LanguageMix` estimates per-language weights from the last words (capped per-word evidence, decay, weaker across sentence ends, prior from how much the user writes in each language plus a nudge to the keyboard's language). `MixedSuggester` runs every language's suggester and merges by weighted score. Cross-language safety: a word valid in any mixed language is only changed by the currently dominant language; case-only fixes (German nouns) only while that language dominates; undone corrections and personal words count across all languages. Committed words are learned into the language with the highest P(word given language) × weight. |
+| Arabizi | Each Latin letter/digit/pair is a set of possible Arabic letters (7 = ح, 3 = ع, sh = ش, short vowels optional, tanween "an" = ا). A dynamic-programming search over the Arabic dictionary's trie keeps only spellings that are words (one state per trie node, so it's exact and fast), scored by the language model with sentence context, a bonus for everyday dialect words (`ar.chat`, built from the curated list) and the user's own earlier picks. Tuned on a 60-word chat benchmark: 95 % top-1, 100 % top-3. Converts on space only when it's clearly Arabizi (Arabizi digits, or right after Arabic) and the word isn't a known Latin word. |
+| Offline AI | LiteRT-LM (Google's on-device LLM runtime) with a model the user downloads once from the official litert-community builds through Android's DownloadManager, checked by size and SHA-256: Gemma 4 E2B (GPU or CPU build), Qwen 3 1.7B, Qwen 3 0.6B. GPU first where the model is built for it, CPU fallback. Kept loaded while used, released after 5 idle minutes or on memory pressure. Gemini Nano via ML Kit's Prompt API where AICore offers it. Same prompts (and tones) as the online providers; also a fallback when an online provider can't be reached. Models aren't bundled: 0.3–2.6 GB would make the APK too large to download and install comfortably. |
+| Tone per app | `EditorInfo.packageName` picks Chill / Clean / Polite prompts: chats chill, work apps clean, email polite, overridable per app. Apps are listed from where the keyboard was used plus well-known installed ones (launcher-intent package visibility only). |
+| Voice typing | Android `SpeechRecognizer`, on-device recogniser first (API 31+), regular one as fallback; RECORD_AUDIO is requested by the settings app (a keyboard can't show permission dialogs). Results are inserted like typing and proofread in the app's tone, undoable from the chip. |
+| Sync | The learning database exported as JSON (minus phone-specific touch data), gzip, AES-256-GCM with a PBKDF2-HMAC-SHA256 (210k rounds) key from the user's passphrase; the passphrase is stored wrapped by an Android Keystore key. One file through the Storage Access Framework (Google Drive works). Merge = max of counts, OR of flags, union of shortcuts, so syncing is idempotent and two phones converge. |
 | Signing | No key is committed (the repo is public). CI signs with a private key from repository secrets, or with a one-off key until those exist (see `RELEASING.md`). |
 
 ## Architecture
@@ -56,7 +61,7 @@ app/
 
 ## Testing
 
-- `engine` — dictionary/LM/corrector/swipe unit tests, a typo benchmark (fix rate ≥ 90 %, zero
+- `engine` — dictionary/LM/corrector/swipe unit tests, an Arabizi benchmark, a typo benchmark (fix rate ≥ 90 %, zero
   slang/swear changes), a swipe benchmark (top-1 ≥ 80 %, top-3 ≥ 93 %; currently 96.5 % / 100 %) and an
   adaptive-keys benchmark (must fix more slips than plain geometry and almost never change a correct tap).
 - `app` — Robolectric tests drive the real `InputMethodService` against a real `EditText`
@@ -71,5 +76,6 @@ app/
   covered by the Robolectric tests above.
 - Context data for Arabic, Dutch and Polish is thinner (smaller Tatoeba corpora); personal
   learning and the AI fill the gap over time.
-- Ideas: voice typing, on-device LLM (Gemini Nano) for offline proofreading on supported phones,
-  sticker/GIF search, per-app tone profiles, cloud sync of learned data.
+- The offline models and Gemini Nano can't run in the JVM tests (native code); their plumbing
+  is tested with a stand-in model. Real-device speed depends on the phone.
+- Ideas: sticker/GIF search, a Latin-letters layout for Arabizi-only typists, handwriting.

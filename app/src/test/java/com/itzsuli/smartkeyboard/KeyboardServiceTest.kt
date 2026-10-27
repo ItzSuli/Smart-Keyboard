@@ -551,7 +551,8 @@ class KeyboardServiceTest {
         service.showSwipePreview("hello")
         shot("swipe")
         overlay.trailEnd()
-        Thread.sleep(400)
+        // Let the trail fade out (the test clock only moves when told to).
+        shadowOf(Looper.getMainLooper()).idleFor(java.time.Duration.ofSeconds(1))
         // Long-press accents on "e" (top row: the popup lives in the band above the keys).
         val e = key("e")
         overlay.showPopup(listOf("3", "é", "è", "ê", "ë", "ē"), android.graphics.RectF(e.bounds.left + loc[0] - oLoc[0], e.bounds.top + loc[1] - oLoc[1],
@@ -578,6 +579,12 @@ class KeyboardServiceTest {
         shot("emoji")
         service.onAiClose()
         repeat(3) { idle() }
+        // Arabizi on the English keyboard: Arabic suggestions for "7abib".
+        waitUntil { service.logic.arabiziReady }
+        typeArabizi(". ya 7abib")
+        Thread.sleep(300); idle()
+        shot("arabizi")
+        typeArabizi("i ")
         val s = (org.robolectric.RuntimeEnvironment.getApplication() as SmartKeyboardApp).settings
         for (t in listOf("dark", "sunset", "neon", "glass", "midnight", "aurora", "cyberpunk", "rose_gold", "mint")) {
             s.set(Settings.THEME, t)
@@ -602,7 +609,8 @@ class KeyboardServiceTest {
         }
         shot("theme_custom")
         overlay.trailEnd()
-        Thread.sleep(400)
+        // Let the trail fade out (the test clock only moves when told to).
+        shadowOf(Looper.getMainLooper()).idleFor(java.time.Duration.ofSeconds(1))
         for (k in listOf(Settings.ACCENT, Settings.KEY_FONT, Settings.CAPITAL_LABELS, Settings.TRAIL_STYLE, Settings.TRAIL_WIDTH)) s.set(k, null)
         s.set(Settings.THEME, "glass"); idle()
         s.set(Settings.CURRENT_LANGUAGE, "de"); idle(); waitUntil { service.logic.isReady }; shot("german")

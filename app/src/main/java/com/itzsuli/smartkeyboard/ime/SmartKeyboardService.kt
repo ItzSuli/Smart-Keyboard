@@ -210,6 +210,7 @@ open class SmartKeyboardService : InputMethodService(), KeyboardView.Listener, S
         strip?.voiceKey = settings.voiceKey
         strip?.aiAvailable = app.ai.isConfigured
         strip?.showAiChip(null)
+        if (settings.aiAutoProof != com.itzsuli.smartkeyboard.data.AiAutoProof.OFF && !logic.isPassword) app.ai.warmUp()
         logic.refreshSuggestions()
     }
 

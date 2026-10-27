@@ -158,7 +158,12 @@ class Settings(context: Context) {
     val aiBaseUrl get() = str(AI_BASE_URL, "")
     val aiAutoProof get() = enumValueOrDefault(str(AI_AUTO_PROOF, AiAutoProof.SUGGEST.name), AiAutoProof.SUGGEST)
     val aiSuggestions get() = bool(AI_SUGGESTIONS, true)
-    val aiEnabled get() = bool(AI_ENABLED, true) && (aiApiKey.isNotBlank() || (aiProvider == "custom" && aiBaseUrl.isNotBlank()))
+    val aiEnabled get() = bool(AI_ENABLED, true) && (aiApiKey.isNotBlank() || (aiProvider == "custom" && aiBaseUrl.isNotBlank()) ||
+        (aiProvider == "ondevice" && offlineEngine.isNotBlank()))
+    /** Offline AI: "nano" (Gemini Nano) or the id of a downloaded model. */
+    val offlineEngine get() = str(OFFLINE_ENGINE, "")
+    /** Use the offline AI when the cloud provider can't be reached. */
+    val offlineFallback get() = bool(OFFLINE_FALLBACK, true)
     /** Default proofreading tone (and the tone everywhere when per-app tones are off). */
     val aiTone get() = enumValueOrDefault(str(AI_TONE, AiTone.CHILL.name).uppercase(), AiTone.CHILL)
     val tonePerApp get() = bool(TONE_PER_APP, true)
@@ -265,6 +270,8 @@ class Settings(context: Context) {
         const val AI_SUGGESTIONS = "ai_suggestions"
         const val AI_ENABLED = "ai_enabled"
         const val AI_TONE = "ai_tone"
+        const val OFFLINE_ENGINE = "ai_offline_engine"
+        const val OFFLINE_FALLBACK = "ai_offline_fallback"
         const val TONE_PER_APP = "tone_per_app"
         const val TONE_APPS = "tone_apps"
         const val SEEN_APPS = "seen_apps"

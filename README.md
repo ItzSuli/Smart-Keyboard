@@ -1,8 +1,8 @@
 # Smart Keyboard
 
 An Android keyboard that types the way you do: relaxed, AI-assisted corrections that never
-"fix" your slang, context-aware word suggestions, fast swipe typing — and it all keeps learning
-from you.
+"fix" your slang, context-aware word suggestions, fast swipe typing, Arabizi, voice typing and
+an AI that can run entirely on your phone — and it all keeps learning from you.
 
 **[⬇ Download the latest APK](https://github.com/ItzSuli/Smart-Keyboard/releases/latest)** — Android 8.0 or newer.
 
@@ -13,19 +13,22 @@ from you.
 | ![Sunset theme](docs/screenshots/theme-sunset.png) | ![Arabic layout](docs/screenshots/arabic.png) | ![Emoji panel](docs/screenshots/emoji.png) |
 | **German on the English keyboard** | **German (QWERTZ)** | **Long-press accents** |
 | ![Mixed typing](docs/screenshots/mixed.png) | ![German layout](docs/screenshots/german.png) | ![Accents](docs/screenshots/accents.png) |
+| **Arabizi: 7abib → حبيب** | **Voice typing** | **Your own colours + rainbow trail** |
+| ![Arabizi](docs/screenshots/arabizi.png) | ![Voice typing](docs/screenshots/voice.png) | ![Custom theme](docs/screenshots/theme-custom.png) |
 
 <p align="center">
   <img src="docs/screenshots/settings-home.png" width="200" alt="Settings home">
   <img src="docs/screenshots/settings-appearance.png" width="200" alt="Appearance settings">
   <img src="docs/screenshots/settings-typing.png" width="200" alt="Typing settings">
   <img src="docs/screenshots/settings-ai.png" width="200" alt="AI settings">
+  <img src="docs/screenshots/settings-offline-ai.png" width="200" alt="Offline AI settings">
 </p>
 
 ## Install
 
 1. Download `SmartKeyboard-vX.Y.Z.apk` from the [latest release](https://github.com/ItzSuli/Smart-Keyboard/releases/latest) and open it (allow "install unknown apps" for your browser or file manager when asked).
 2. Open **Smart Keyboard** and follow the two setup steps (turn it on, then switch to it).
-3. Optional: open **AI assistant** and paste an API key to turn on AI proofreading. Google Gemini has a free tier.
+3. Optional: turn on AI proofreading. Either **AI assistant → Offline AI** (download a model once; no key, no internet, nothing leaves the phone) or paste an API key (Google Gemini has a free tier).
 
 ## What it does
 
@@ -43,19 +46,35 @@ Write German on the English keyboard (or any mix of Latin-script languages) with
 - Every word is learned into the language it belongs to, your slang is protected in both, and the AI proofreads "English and German" text as such.
 - Turn it on under **Languages → Mixed typing** (tap *Deutsch* while on the English keyboard). It's on by default when English and German are both enabled. Swipe accuracy on English words barely changes with German mixed in (95.0 % vs 95.7 % top-1, no context).
 
+### Arabizi
+Type Arabic with Latin letters and numbers, the way people chat: `7abibi → حبيبي`, `3arabi → عربي`, `2albi → قلبي`, `kifak → كيفك`, `5alas → خلاص`.
+- On the English (or any Latin) keyboard when Arabic is one of your languages. Words with Arabizi numbers (2 3 5 6 7 8 9) convert on space; right after Arabic, plain Latin Arabizi does too. Everything else just gets an Arabic suggestion, so English stays English (`gr8`, `2day` are left alone).
+- Backspace undoes a conversion and it's remembered; picking an Arabic suggestion teaches it how *you* spell that word.
+- Prefers everyday dialect words (Levantine, Gulf, Egyptian, Maghrebi) over formal Arabic. 95 % right first time, 100 % in the top three on a 60-word chat benchmark (`ArabiziTest`).
+
 ### Smart, learning suggestions
 - Completions and next-word predictions from a trigram language model built from everyday spoken language (subtitles) and conversational sentences.
 - Personal model: every word you send teaches it your vocabulary, your phrases and your habits, and the more you type the more your own style wins. New words and slang are learned after you use them twice.
 - Picking a correction teaches it that typo; long-pressing a suggestion blocks it forever.
 - Emoji suggestions (`pizza` → 🍕, `liebe` → ❤️, `هههه` → 😂).
 
+### Offline AI — on your phone
+- **No key, no internet, nothing leaves the phone.** Download one model once (Settings → AI assistant → Offline AI): **Gemma 4 E2B** (Google, best quality in English, German, Arabic and 140+ languages, 2 GB, fast on flagships such as the Galaxy S24), **Qwen 3 1.7B** (1 GB) or **Qwen 3 0.6B** (345 MB). Runs with Google's LiteRT-LM runtime on the GPU or CPU.
+- **Gemini Nano** is used on phones where Android has it built in (AICore).
+- Everything AI works with it: chill proofreading, rewrites, translation, voice tidy-up. With an online provider it can also step in automatically when there's no internet.
+
 ### AI assistant (optional, bring your own key)
 - **Proofread the chill way.** It fixes typos and grammar slips but keeps your tone, slang, swearing, emoji and lowercase style. Your learned words are sent along so the AI never "corrects" them.
 - **Auto-proofread each sentence**: Manual, Suggest (a one-tap fix appears in the bar) or Auto-fix (tap to undo).
+- **Tone per app**: chill in WhatsApp, Snapchat and Instagram, clean in Slack and Teams, polite in Gmail and Outlook — automatically, and you can change any app.
 - **Rewrite** (chill, friendlier, formal, shorter, expand, add emoji) and **translate** (English ⇄ German ⇄ Arabic and every other enabled language) with a diff preview before applying.
 - **AI next-word ideas** blended into the suggestion bar.
 - **Learning loop**: typo fixes you accept from the AI become instant on-device autocorrections.
 - Providers: **Google Gemini**, **Anthropic Claude** (official Java SDK; Opus 5.5 for best quality, Haiku 5.5 for speed), **OpenAI**, **Groq**, **OpenRouter**, or any OpenAI-compatible server such as a local **Ollama**.
+
+### Voice typing
+- Tap 🎤 on the suggestion bar and talk. Uses your phone's on-device speech recogniser when it has one (audio stays on the phone).
+- What you said goes through the same chill proofreading, in the app's tone; the AI's fix can be undone with one tap.
 
 ### Swipe typing
 - Glide over the letters. The decoder resamples your path, keeps only words whose letters the path visits in order, then scores shape with dynamic time warping, combined with sentence context and your personal words. Your slang can be swiped too.
@@ -70,7 +89,9 @@ On simulated thumb typing (`AdaptiveKeysBenchmarkTest`), "Balanced" cuts mistype
 
 ### Everything else
 - **11 languages**, each with its own layout, dictionary, slang and swear words, and its own learned data: English, German (QWERTZ, ä ö ü ß), Arabic (with Arabic-Indic digits option), French (AZERTY), Spanish, Italian, Portuguese, Turkish, Dutch, Russian and Polish. Switch with 🌐.
-- **Looks**: 11 themes plus Material You and Auto (light/dark), custom accent colour, your own background picture, key shape/gap/height/letter size, number row, flat or key-background style.
+- **Looks**: 25 themes plus Material You, Auto (light/dark) and **your own colours** (background with optional gradient, keys, letters, any accent colour), your own background picture, 7 key fonts, capital letters on keys, key shadows, swipe trail colour (accent, rainbow, letters) and thickness, key shape/gap/height/letter size, number row, flat or key-background style.
+- **Your own shortcuts**: only the ones you add ("omw" → "On my way!"), offered as a suggestion or expanded on space — never anything built in.
+- **Sync between phones**: everything the keyboard learned, end-to-end encrypted (AES-256, your passphrase) in one file you keep in Google Drive or any folder.
 - **Works with every app's enter key**: Send in Snapchat, WhatsApp and other chats, Search, Go, Next, Done. Long-press enter for a new line.
 - **Switch-keyboard button** on the right of the suggestion bar: tap to pick another keyboard app, hold to jump to the next one (can be hidden).
 - **Haptics that feel right**: crisp clicks from your phone's precise haptic engine (Crisp, Soft, Classic or exactly like the System keyboard), lighter ticks that speed up with held delete, and a cursor tick only when the cursor really moves.
@@ -79,7 +100,7 @@ On simulated thumb typing (`AdaptiveKeysBenchmarkTest`), "Balanced" cuts mistype
 
 ## Privacy
 
-Typing, suggestions, autocorrect, swipe and all learning run on the device. The internet permission is only used by the optional AI features, which talk directly to the provider you configure with your own key. Nothing is ever learned from, or sent to an AI from, password fields, incognito mode or apps that ask for no personalised learning. Learned data is excluded from Android cloud backups; use the built-in export instead.
+Typing, suggestions, autocorrect, swipe, Arabizi and all learning run on the device. The internet permission is only used by the optional online AI features, which talk directly to the provider you configure with your own key, and to download an offline model once if you choose one. With offline AI nothing is sent anywhere. Voice typing uses the phone's speech recogniser (the on-device one when available) and the microphone only while the 🎤 panel is open. Sync files are encrypted on the phone with your passphrase before they're saved. Nothing is ever learned from, or sent to an AI from, password fields, incognito mode or apps that ask for no personalised learning. Learned data is excluded from Android cloud backups; use the built-in export instead.
 
 ## Project layout
 
@@ -107,3 +128,5 @@ Every push runs the tests on GitHub Actions. Releases are published from `main`,
 - Context data and capitalisation: [Tatoeba](https://tatoeba.org) sentences, CC BY 2.0 FR
 - Emoji data: Unicode `emoji-test.txt`, Unicode License v3
 - Claude provider: [Anthropic Java SDK](https://github.com/anthropics/anthropic-sdk-java), MIT
+- Offline AI runtime: [LiteRT-LM](https://github.com/google-ai-edge/LiteRT-LM), Apache 2.0; Gemini Nano through [ML Kit GenAI](https://developers.google.com/ml-kit/genai)
+- Offline models (downloaded on request, not bundled): [Gemma 4 E2B](https://huggingface.co/litert-community/gemma-4-E2B-it-litert-lm) by Google and [Qwen 3](https://huggingface.co/litert-community/Qwen3-1.7B) by Alibaba, both Apache 2.0

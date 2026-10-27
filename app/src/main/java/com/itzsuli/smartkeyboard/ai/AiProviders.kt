@@ -13,7 +13,8 @@ import java.net.HttpURLConnection
 import java.net.URL
 import java.time.Duration
 
-class AiException(message: String) : Exception(message)
+/** A readable AI error. [cause] is kept so callers can tell a missing connection apart. */
+class AiException(message: String, cause: Throwable? = null) : Exception(message, cause)
 
 /** One request/response round trip to a language model. */
 interface AiProvider {
@@ -29,7 +30,9 @@ enum class ProviderPreset(val id: String, val label: String, val defaultModel: S
     OPENAI("openai", "OpenAI", "gpt-4.1-mini", "https://api.openai.com/v1", "platform.openai.com/api-keys"),
     GROQ("groq", "Groq (very fast)", "llama-3.1-8b-instant", "https://api.groq.com/openai/v1", "console.groq.com/keys"),
     OPENROUTER("openrouter", "OpenRouter", "openai/gpt-4.1-mini", "https://openrouter.ai/api/v1", "openrouter.ai/keys"),
-    CUSTOM("custom", "Custom (OpenAI-compatible, e.g. Ollama)", "", "http://localhost:11434/v1", "");
+    CUSTOM("custom", "Custom (OpenAI-compatible, e.g. Ollama)", "", "http://localhost:11434/v1", ""),
+    /** Runs on the phone: Gemini Nano or a downloaded model (see Offline AI). */
+    ON_DEVICE("ondevice", "On this phone — offline, private, free", "", "", "");
 
     companion object {
         fun of(id: String) = entries.firstOrNull { it.id == id } ?: GEMINI
@@ -81,7 +84,7 @@ class ClaudeProvider(apiKey: String, private val model: String, baseUrl: String?
         } catch (e: AnthropicServiceException) {
             throw AiException("Claude error ${e.statusCode()}: ${e.message}")
         } catch (e: Exception) {
-            throw AiException(e.message ?: "Network error")
+            throw AiException(e.message ?: "Network error", e)
         }
         if (response.stopReason().map { it.toString() }.orElse("") == "refusal") {
             throw AiException("Claude declined this text")
@@ -124,7 +127,7 @@ private fun httpJson(url: String, method: String, headers: Map<String, String>, 
         }
         return JSONObject(text)
     } catch (e: IOException) {
-        throw AiException(e.message ?: "Network error")
+        throw AiException(e.message ?: "Network error", e)
     } finally {
         conn.disconnect()
     }

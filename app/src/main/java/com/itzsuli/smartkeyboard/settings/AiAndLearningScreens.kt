@@ -22,6 +22,7 @@ import androidx.compose.material.icons.rounded.Block
 import androidx.compose.material.icons.rounded.Delete
 import androidx.compose.material.icons.rounded.FileDownload
 import androidx.compose.material.icons.rounded.FileUpload
+import androidx.compose.material.icons.rounded.PhoneAndroid
 import androidx.compose.material.icons.rounded.RestartAlt
 import androidx.compose.material.icons.rounded.Sync
 import androidx.compose.material.icons.rounded.Tune
@@ -121,6 +122,11 @@ fun AiScreen(onBack: () -> Unit, open: (String) -> Unit = {}) {
             }
         }
         item {
+            Group("Offline AI") {
+                NavRow("On this phone", "Gemini Nano or a downloaded model: no key, no internet, nothing leaves the phone", Icons.Rounded.PhoneAndroid) { open("offline_ai") }
+            }
+        }
+        item {
             Group("Provider") {
                 SwitchSetting(Settings.AI_ENABLED, "AI features", "Turn everything AI off without losing your setup") { st -> st.prefs.getBoolean(Settings.AI_ENABLED, true) }
                 Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -144,7 +150,19 @@ fun AiScreen(onBack: () -> Unit, open: (String) -> Unit = {}) {
                             }
                         }
                     }
-                    if (preset != ProviderPreset.CUSTOM || key.isNotEmpty()) OutlinedTextField(
+                    if (preset == ProviderPreset.ON_DEVICE) {
+                        val engine = s.offlineEngine
+                        Text(
+                            when {
+                                engine.isBlank() -> "No offline model chosen yet."
+                                engine == "nano" -> "Using Gemini Nano, built into this phone."
+                                else -> "Using ${com.itzsuli.smartkeyboard.data.OfflineModel.of(engine)?.label ?: engine} on this phone."
+                            },
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
+                        Button(onClick = { open("offline_ai") }) { Text("Offline AI models…") }
+                    }
+                    if (preset != ProviderPreset.ON_DEVICE && (preset != ProviderPreset.CUSTOM || key.isNotEmpty())) OutlinedTextField(
                         value = key, onValueChange = { key = it }, label = { Text("API key") }, singleLine = true,
                         visualTransformation = if (showKey) VisualTransformation.None else PasswordVisualTransformation(),
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
@@ -152,7 +170,7 @@ fun AiScreen(onBack: () -> Unit, open: (String) -> Unit = {}) {
                         supportingText = { if (preset.keyHint.isNotEmpty()) Text("Get one at ${preset.keyHint}") },
                         modifier = Modifier.fillMaxWidth(),
                     )
-                    OutlinedTextField(value = model, onValueChange = { model = it }, label = { Text("Model") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                    if (preset != ProviderPreset.ON_DEVICE) OutlinedTextField(value = model, onValueChange = { model = it }, label = { Text("Model") }, singleLine = true, modifier = Modifier.fillMaxWidth())
                     if (preset == ProviderPreset.CLAUDE) {
                         ProviderPreset.CLAUDE_MODELS.forEach { (id, label) ->
                             FilterChip(selected = model == id, onClick = { model = id }, label = { Text(label) })
@@ -164,10 +182,10 @@ fun AiScreen(onBack: () -> Unit, open: (String) -> Unit = {}) {
                             models.take(40).forEach { m -> AssistChip(onClick = { model = m }, label = { Text(m) }) }
                         }
                     }
-                    if (preset != ProviderPreset.CLAUDE && preset != ProviderPreset.GEMINI) {
+                    if (preset != ProviderPreset.CLAUDE && preset != ProviderPreset.GEMINI && preset != ProviderPreset.ON_DEVICE) {
                         OutlinedTextField(value = baseUrl, onValueChange = { baseUrl = it }, label = { Text("Server URL") }, singleLine = true, modifier = Modifier.fillMaxWidth())
                     }
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    if (preset != ProviderPreset.ON_DEVICE) Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         Button(onClick = {
                             save()
                             status = "Testing…"
@@ -194,7 +212,7 @@ fun AiScreen(onBack: () -> Unit, open: (String) -> Unit = {}) {
                     },
                     listOf(AiAutoProof.OFF to "Manual", AiAutoProof.SUGGEST to "Suggest", AiAutoProof.AUTO to "Auto-fix"), autoProof,
                 ) { s.set(Settings.AI_AUTO_PROOF, it) }
-                SwitchSetting(Settings.AI_SUGGESTIONS, "AI word suggestions", "Adds context-aware next-word ideas (sends the text before the cursor after each word)") { it.aiSuggestions }
+                SwitchSetting(Settings.AI_SUGGESTIONS, "AI word suggestions", "Adds context-aware next-word ideas (sends the text before the cursor after each word). Online providers only — offline AI saves your battery for proofreading.") { it.aiSuggestions }
             }
         }
         item {

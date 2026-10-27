@@ -20,6 +20,12 @@ class SmartKeyboardApp : Application() {
     val shortcuts by lazy { Shortcuts(store) }
     val sync by lazy { SyncManager(this, settings) }
 
+    override fun onTrimMemory(level: Int) {
+        super.onTrimMemory(level)
+        // An offline AI model holds a lot of memory: give it back when the phone needs it.
+        if (level >= TRIM_MEMORY_RUNNING_LOW) com.itzsuli.smartkeyboard.ai.LocalLlm.release()
+    }
+
     companion object {
         fun of(context: Context): SmartKeyboardApp = context.applicationContext as SmartKeyboardApp
     }

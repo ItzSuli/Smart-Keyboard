@@ -22,7 +22,7 @@ import java.io.File
 class SettingsScreenshotTest {
     @Test fun rendersSettingsScreens() {
         val out = File("build/screenshots").apply { mkdirs() }
-        for (section in listOf("home", "appearance", "typing", "languages", "ai", "learning", "about", "voice", "shortcuts", "tones", "sync")) {
+        for (section in listOf("home", "appearance", "typing", "languages", "ai", "learning", "about", "voice", "shortcuts", "tones", "sync", "offline_ai")) {
             val intent = Intent(org.robolectric.RuntimeEnvironment.getApplication(), MainActivity::class.java)
             if (section != "home") intent.putExtra(MainActivity.EXTRA_SECTION, section)
             val controller = Robolectric.buildActivity(MainActivity::class.java, intent).setup()

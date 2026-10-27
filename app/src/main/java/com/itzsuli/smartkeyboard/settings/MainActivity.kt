@@ -105,6 +105,7 @@ fun SettingsApp(section: String?, onSectionHandled: () -> Unit) {
         composable("shortcuts") { ShortcutsScreen(back) }
         composable("tones") { AppTonesScreen(back) }
         composable("sync") { SyncScreen(back) }
+        composable("offline_ai") { OfflineAiScreen(back) }
     }
 }
 

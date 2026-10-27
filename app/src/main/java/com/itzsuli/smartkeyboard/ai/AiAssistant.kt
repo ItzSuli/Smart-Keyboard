@@ -30,8 +30,33 @@ class AiAssistant(private val context: Context, private val settings: Settings) 
 
     val isConfigured: Boolean get() = settings.aiEnabled
 
+    /**
+     * Runs a request on the chosen provider. If a cloud provider can't be reached (no
+     * internet) and an offline model is ready, the phone answers instead.
+     */
+    private fun complete(system: String, user: String, maxTokens: Int, fast: Boolean): String {
+        val p = provider()
+        return try {
+            p.complete(system, user, maxTokens, fast)
+        } catch (e: Exception) {
+            val offline = settings.offlineEngine
+            val noInternet = generateSequence<Throwable>(e) { it.cause }.any { it is java.io.IOException }
+            if (p is OnDeviceProvider || !noInternet || !settings.offlineFallback || !OnDeviceProvider.isReady(context, offline)) throw e
+            OnDeviceProvider(context, offline).complete(system, user, maxTokens, fast)
+        }
+    }
+
+    /** Loads the offline model in the background so the first fix is quick. */
+    fun warmUp() {
+        if (ProviderPreset.of(settings.aiProvider) != ProviderPreset.ON_DEVICE || !settings.aiEnabled) return
+        val model = com.itzsuli.smartkeyboard.data.OfflineModel.of(settings.offlineEngine) ?: return
+        if (LocalLlm.isLoaded) return
+        executor.execute { LocalLlm.warmUp(context, model) }
+    }
+
     private fun provider(): AiProvider {
         val preset = ProviderPreset.of(settings.aiProvider)
+        if (preset == ProviderPreset.ON_DEVICE) return OnDeviceProvider(context, settings.offlineEngine.ifBlank { throw AiException("Pick an offline model in AI settings") })
         val signature = listOf(preset.id, settings.aiApiKey, settings.aiModel, settings.aiBaseUrl).joinToString("|")
         cachedProvider?.let { if (it.first == signature) return it.second }
         if (settings.aiApiKey.isBlank() && preset != ProviderPreset.CUSTOM) throw AiException("Add an API key in AI settings")
@@ -57,16 +82,16 @@ class AiAssistant(private val context: Context, private val settings: Settings) 
     }
 
     fun proofread(text: String, langs: List<String>, tone: AiTone = settings.aiTone, onResult: (Result<String>) -> Unit) = run({
-        val out = provider().complete(Prompts.proofread(languageName(langs), slangFor(langs), tone), Prompts.wrap(text), maxTokensFor(text), fast = false)
+        val out = complete(Prompts.proofread(languageName(langs), slangFor(langs), tone), Prompts.wrap(text), maxTokensFor(text), fast = false)
         Prompts.clean(out).ifEmpty { text }
     }, onResult)
 
     fun rewrite(text: String, mode: Prompts.Rewrite, langs: List<String>, onResult: (Result<String>) -> Unit) = run({
-        Prompts.clean(provider().complete(Prompts.rewrite(mode, languageName(langs), slangFor(langs)), Prompts.wrap(text), maxTokensFor(text) * 2, fast = false))
+        Prompts.clean(complete(Prompts.rewrite(mode, languageName(langs), slangFor(langs)), Prompts.wrap(text), maxTokensFor(text) * 2, fast = false))
     }, onResult)
 
     fun translate(text: String, targetLang: String, onResult: (Result<String>) -> Unit) = run({
-        Prompts.clean(provider().complete(Prompts.translate(Languages.get(targetLang).englishName), Prompts.wrap(text), maxTokensFor(text) * 2, fast = false))
+        Prompts.clean(complete(Prompts.translate(Languages.get(targetLang).englishName), Prompts.wrap(text), maxTokensFor(text) * 2, fast = false))
     }, onResult)
 
     /**
@@ -75,12 +100,14 @@ class AiAssistant(private val context: Context, private val settings: Settings) 
      */
     fun predictNext(textBefore: String, langs: List<String>, onResult: (List<String>) -> Unit) {
         val gen = predictionGeneration.incrementAndGet()
+        // An offline model after every word would cost a lot of battery for little gain.
+        if (ProviderPreset.of(settings.aiProvider) == ProviderPreset.ON_DEVICE) return
         val key = "${langs.joinToString(",")}|${textBefore.takeLast(160)}"
         synchronized(predictionCache) { predictionCache[key] }?.let { onResult(it); return }
         executor.execute {
             if (gen != predictionGeneration.get()) return@execute
             val words = runCatching {
-                val out = provider().complete(Prompts.nextWords(languageName(langs), slangFor(langs)), textBefore.takeLast(400), 40, fast = true)
+                val out = complete(Prompts.nextWords(languageName(langs), slangFor(langs)), textBefore.takeLast(400), 40, fast = true)
                 parseWords(out)
             }.getOrDefault(emptyList())
             synchronized(predictionCache) { if (words.isNotEmpty()) predictionCache[key] = words }
@@ -113,7 +140,7 @@ class AiAssistant(private val context: Context, private val settings: Settings) 
     }
 
     fun testConnection(onResult: (Result<String>) -> Unit) = run({
-        val out = provider().complete("Reply with exactly: ok", "ping", 10, fast = true)
+        val out = complete("Reply with exactly: ok", "ping", 10, fast = true)
         "Connected ✓ (model replied: ${out.take(40)})"
     }, onResult)
 

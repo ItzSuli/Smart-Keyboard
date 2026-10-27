@@ -18,8 +18,8 @@ android {
         applicationId = "com.itzsuli.smartkeyboard"
         minSdk = 26
         targetSdk = 35
-        versionCode = 3
-        versionName = "1.2.0"
+        versionCode = 4
+        versionName = "1.3.0"
     }
 
     signingConfigs {
@@ -67,6 +67,8 @@ android {
             "META-INF/native-image/**", "META-INF/licenses/**", "META-INF/LICENSE*", "META-INF/NOTICE*",
             "META-INF/DEPENDENCIES", "META-INF/INDEX.LIST",
         )
+        // The offline AI runtime is large: compressed, the APK download is about half the size.
+        jniLibs.useLegacyPackaging = true
     }
 
     testOptions {
@@ -98,6 +100,9 @@ dependencies {
     // Claude provider for the AI features (official SDK); align kotlin-reflect with our Kotlin.
     implementation(libs.anthropic.java)
     implementation(libs.kotlin.reflect)
+    // Offline AI: a local model (LiteRT-LM) on any recent phone, Gemini Nano where Android has it.
+    implementation(libs.litertlm.android)
+    implementation(libs.mlkit.genai.prompt)
 
     implementation(platform(libs.compose.bom))
     implementation(libs.compose.ui)
