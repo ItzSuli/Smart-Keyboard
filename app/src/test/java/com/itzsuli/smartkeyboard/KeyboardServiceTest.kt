@@ -459,6 +459,23 @@ class KeyboardServiceTest {
         assertTrue(text, text.endsWith("skrrt skrrt skrrt "))
     }
 
+    @Test fun fixingATypoAtASentenceStartSavesNothing() {
+        val lex = (org.robolectric.RuntimeEnvironment.getApplication() as SmartKeyboardApp).languages.lexicon("en")
+        // "whst" at the start of a sentence, fixed by tapping the keyboard's own idea, three times.
+        repeat(3) {
+            type("whst")
+            waitUntil { service.logic.shownSuggestions.any { it.text == "What" } }
+            service.logic.onSuggestionPicked(service.logic.shownSuggestions.first { it.text == "What" }); sync()
+            type("is it. ")
+        }
+        waitUntil { lex.count("what") >= 3 }
+        // An ordinary slip isn't kept as a "learned fix", and the capital isn't learned either.
+        assertTrue(lex.correctionsFor("whst").toString(), lex.correctionsFor("whst").isEmpty())
+        assertEquals("what", lex.word("what")!!.display)
+        type("so what ")
+        assertTrue(text, text.endsWith("So what "))
+    }
+
     @Test fun mixesGermanIntoTheEnglishKeyboard() {
         // English + German are both enabled, so they are mixed by default.
         assertEquals("English · Deutsch", keyboard.layout!!.keys.first { it.code == KeyCode.SPACE }.label)

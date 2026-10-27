@@ -51,7 +51,12 @@ class Settings(context: Context) {
             is Enum<*> -> putString(key, value.name)
             else -> error("Unsupported setting type for $key")
         }
+        // When the user last changed a setting: sync keeps the newest settings.
+        if (key !in AUTOMATIC) putLong(CHANGED_AT, System.currentTimeMillis())
     }
+
+    /** When the user last changed a setting (0 = never: a fresh install). */
+    val changedAt get() = prefs.getLong(CHANGED_AT, 0L)
 
     // ---- appearance ----
     val themeId get() = str(THEME, "auto")
@@ -161,7 +166,7 @@ class Settings(context: Context) {
     val aiEnabled get() = bool(AI_ENABLED, true) && (aiApiKey.isNotBlank() || (aiProvider == "custom" && aiBaseUrl.isNotBlank()) ||
         (aiProvider == "ondevice" && offlineEngine.isNotBlank()))
     /** Offline AI: "nano" (Gemini Nano) or the id of a downloaded model. */
-    val offlineEngine get() = str(OFFLINE_ENGINE, "")
+    val offlineEngine get() = OfflineModel.current(str(OFFLINE_ENGINE, ""))
     /** Use the offline AI when the cloud provider can't be reached. */
     val offlineFallback get() = bool(OFFLINE_FALLBACK, true)
     /** Default proofreading tone (and the tone everywhere when per-app tones are off). */
@@ -284,6 +289,9 @@ class Settings(context: Context) {
         const val SYNC_ERROR = "sync_error"
         /** Bumped when a new background picture is saved. */
         const val BG_VERSION = "bg_version"
+        const val CHANGED_AT = "settings_changed_at"
+        /** Kept up to date by the app itself, not choices the user makes. */
+        val AUTOMATIC = setOf(SEEN_APPS, EMOJI_RECENTS, CURRENT_LANGUAGE, SYNC_URI, SYNC_SECRET, SYNC_LAST, SYNC_ERROR, BG_VERSION, CHANGED_AT)
 
         /** Settings that change how the keyboard looks. */
         val APPEARANCE = setOf(

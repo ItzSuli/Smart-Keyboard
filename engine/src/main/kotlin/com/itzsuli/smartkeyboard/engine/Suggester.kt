@@ -146,8 +146,8 @@ class Suggester(
 
         val capitalisationFix = if (auto == null && typedValid && fixCapitalization && case == TextUtils.Case.LOWER &&
             mode != AutoCorrectMode.OFF && lm.user.rejectionCount(typedKey, typedKey) == 0) {
-            val r = render(typedKey)
-            val display = lm.display(typedKey)
+            val display = lm.properCase(typedKey)
+            val r = prefix + display
             val capitalisedForm = display.length > 1 && display[0].isUpperCase() && display.substring(1).none { it.isUpperCase() }
             val common = lang == "de" || typedScore >= -6.5f || display.startsWith("I")
             if (r != typedText && (capitalisedForm || display == "I") && common) Suggestion(r, Suggestion.Kind.CORRECTION, typedScore) else null

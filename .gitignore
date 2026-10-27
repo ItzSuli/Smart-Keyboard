@@ -18,3 +18,4 @@ __pycache__/
 *.jks
 *.keystore
 signing/
+*.p12

@@ -43,7 +43,7 @@ jobs:
             {
               echo "SK_KEYSTORE_FILE=$RUNNER_TEMP/release.jks"
               echo "SK_KEYSTORE_PASSWORD=$SK_KEYSTORE_PASSWORD"
-              echo "SK_KEY_ALIAS=$SK_KEY_ALIAS"
+              echo "SK_KEY_ALIAS=${SK_KEY_ALIAS:-smartkeyboard}"
               echo "SK_KEY_PASSWORD=${SK_KEY_PASSWORD:-$SK_KEYSTORE_PASSWORD}"
               echo "SIGNING=permanent"
             } >> "$GITHUB_ENV"
@@ -104,11 +104,14 @@ jobs:
 
           > **Note on updates:** this build is signed with a one-off key because the repository has no
           > signing secrets yet. Android only installs an update signed with the same key, so before
-          > installing a later build: export your learned words (Settings → Your words & learning →
-          > Export), uninstall, install the new APK and import them again. Adding the signing secrets
-          > described in `docs/RELEASING.md` makes every future update install seamlessly.
+          > installing a later build: save a backup (Settings → Updates & backup → Save), uninstall,
+          > install the new APK and restore it. Adding the two signing secrets described in
+          > `docs/RELEASING.md` makes every future update install over the top, keeping everything.
           NOTE
           fi
+          APKSIGNER="$(ls -d "$ANDROID_HOME"/build-tools/*/ 2>/dev/null | sort -V | tail -1)apksigner"
+          CERT="$("$APKSIGNER" verify --print-certs "SmartKeyboard-v$VERSION.apk" 2>/dev/null | grep -m1 'certificate SHA-256 digest' | sed 's/.*digest: //' || true)"
+          if [ -n "$CERT" ]; then printf '\n<sub>Signing certificate SHA-256: `%s`</sub>\n' "$CERT" >> notes.md; fi
           # Re-publishing the same version replaces the previous build of it.
           gh release delete "$TAG" --cleanup-tag --yes || true
           gh release create "$TAG" "SmartKeyboard-v$VERSION.apk" "SmartKeyboard-v$VERSION.apk.sha256" \

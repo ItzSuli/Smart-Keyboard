@@ -29,6 +29,7 @@ import androidx.compose.material.icons.rounded.Mic
 import androidx.compose.material.icons.rounded.Palette
 import androidx.compose.material.icons.rounded.Psychology
 import androidx.compose.material.icons.rounded.RadioButtonUnchecked
+import androidx.compose.material.icons.rounded.SystemUpdate
 import androidx.compose.material.icons.rounded.Translate
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -62,6 +63,9 @@ import androidx.navigation.compose.rememberNavController
 import com.itzsuli.smartkeyboard.SmartKeyboardApp
 import com.itzsuli.smartkeyboard.data.Languages
 import com.itzsuli.smartkeyboard.data.Settings
+import com.itzsuli.smartkeyboard.data.Updater
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 class MainActivity : ComponentActivity() {
     private val pendingSection = mutableStateOf<String?>(null)
@@ -106,6 +110,7 @@ fun SettingsApp(section: String?, onSectionHandled: () -> Unit) {
         composable("tones") { AppTonesScreen(back) }
         composable("sync") { SyncScreen(back) }
         composable("offline_ai") { OfflineAiScreen(back) }
+        composable("updates") { UpdatesScreen(back) { nav.navigate(it) } }
     }
 }
 
@@ -145,8 +150,26 @@ fun HomeScreen(open: (String) -> Unit) {
     val langs by setting(Settings.LANGUAGES) { it.languages }
     val aiOn = app.settings.aiEnabled
     val theme by setting(Settings.THEME) { it.themeId }
+    var update by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(Unit) {
+        if (Updater.autoCheck) update = withContext(Dispatchers.IO) { Updater(context).availableVersion() }
+    }
     SettingsPage("Smart Keyboard", onBack = null) {
         item { Hero() }
+        update?.let { version ->
+            item {
+                Card(onClick = { open("updates") }, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(24.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer)) {
+                    Row(Modifier.padding(18.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Rounded.SystemUpdate, null)
+                        Column(Modifier.padding(start = 14.dp)) {
+                            Text("Version $version is out", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                            Text("Tap to update. Your settings and words stay.", style = MaterialTheme.typography.bodySmall)
+                        }
+                    }
+                }
+            }
+        }
         if (!setup.enabled || !setup.selected) item {
             Card(shape = RoundedCornerShape(24.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)) {
                 Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -180,6 +203,8 @@ fun HomeScreen(open: (String) -> Unit) {
                 NavRow("Voice typing", "Speak, and it's proofread the chill way", Icons.Rounded.Mic) { open("voice") }
                 Divider()
                 NavRow("Your words & learning", "What the keyboard learned from you", Icons.Rounded.Psychology) { open("learning") }
+                Divider()
+                NavRow("Updates & backup", "Update in the app, keep your settings", Icons.Rounded.SystemUpdate) { open("updates") }
                 Divider()
                 NavRow("About & privacy", null, Icons.Rounded.Info) { open("about") }
             }

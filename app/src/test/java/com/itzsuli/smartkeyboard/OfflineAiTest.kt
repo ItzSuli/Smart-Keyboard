@@ -74,6 +74,20 @@ class OfflineAiTest {
         assertFalse(LocalLlm.isLoaded)
     }
 
+    @Test fun gibberishNeverReachesTheText() {
+        // What a broken model build answered: other alphabets and emoji in a German sentence.
+        LocalLlm.factory = { _, _ ->
+            object : LocalLlm.Runner {
+                override fun generate(system: String, user: String, maxTokens: Int) = "Ich bin 明天 leider не da 😢"
+                override fun close() {}
+            }
+        }
+        app.settings.set(Settings.AI_PROVIDER, "ondevice")
+        val r = await<String> { app.ai.proofread("Ich bin morgen leider nicht da", listOf("en", "de"), onResult = it) }
+        assertTrue(r.isFailure)
+        assertTrue(r.exceptionOrNull()?.message, r.exceptionOrNull()?.message!!.contains("nothing was changed"))
+    }
+
     @Test fun theKeyboardNeverWaitsForTheModelToLoad() {
         // A model that takes 1.5 s to load, like a big one on a phone.
         LocalLlm.factory = { _, _ ->
@@ -118,6 +132,12 @@ class OfflineAiTest {
             assertEquals(64, m.sha256.length)
         }
         assertEquals("345 MB", OfflineModel.QWEN3_0_6B.sizeLabel)
-        assertEquals("2.0 GB", OfflineModel.GEMMA4_E2B_GPU.sizeLabel)
+        assertEquals("2.6 GB", OfflineModel.GEMMA4_E2B.sizeLabel)
+        // The broken browser build is gone; the old CPU choice carries over.
+        assertTrue(OfflineModel.entries.none { it.fileName.contains("-gpu") || it.fileName.contains("web") })
+        assertEquals(OfflineModel.GEMMA4_E2B, OfflineModel.of("gemma4-e2b-cpu"))
+        assertEquals(null, OfflineModel.of("gemma4-e2b-gpu"))
+        app.settings.set(Settings.OFFLINE_ENGINE, "gemma4-e2b-gpu")
+        assertEquals("", app.settings.offlineEngine)
     }
 }

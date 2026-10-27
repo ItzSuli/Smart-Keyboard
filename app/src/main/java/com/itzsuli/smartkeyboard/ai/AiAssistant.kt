@@ -7,6 +7,7 @@ import com.itzsuli.smartkeyboard.SmartKeyboardApp
 import com.itzsuli.smartkeyboard.data.AiTone
 import com.itzsuli.smartkeyboard.data.Languages
 import com.itzsuli.smartkeyboard.data.Settings
+import com.itzsuli.smartkeyboard.engine.AiOutputCheck
 import com.itzsuli.smartkeyboard.engine.TextDiff
 import com.itzsuli.smartkeyboard.engine.TextUtils
 import com.itzsuli.smartkeyboard.engine.UserLexicon
@@ -82,17 +83,25 @@ class AiAssistant(private val context: Context, private val settings: Settings) 
     }
 
     fun proofread(text: String, langs: List<String>, tone: AiTone = settings.aiTone, onResult: (Result<String>) -> Unit) = run({
-        val out = complete(Prompts.proofread(languageName(langs), slangFor(langs), tone), Prompts.wrap(text), maxTokensFor(text), fast = false)
-        Prompts.clean(out).ifEmpty { text }
+        val out = Prompts.clean(complete(Prompts.proofread(languageName(langs), slangFor(langs), tone), Prompts.wrap(text), maxTokensFor(text), fast = false))
+        if (out.isEmpty()) text else checked(text, out, AiOutputCheck.Kind.PROOFREAD, langs)
     }, onResult)
 
     fun rewrite(text: String, mode: Prompts.Rewrite, langs: List<String>, onResult: (Result<String>) -> Unit) = run({
-        Prompts.clean(complete(Prompts.rewrite(mode, languageName(langs), slangFor(langs)), Prompts.wrap(text), maxTokensFor(text) * 2, fast = false))
+        val out = Prompts.clean(complete(Prompts.rewrite(mode, languageName(langs), slangFor(langs)), Prompts.wrap(text), maxTokensFor(text) * 2, fast = false))
+        checked(text, out, if (mode == Prompts.Rewrite.EMOJI) AiOutputCheck.Kind.REWRITE_EMOJI else AiOutputCheck.Kind.REWRITE, langs)
     }, onResult)
 
     fun translate(text: String, targetLang: String, onResult: (Result<String>) -> Unit) = run({
-        Prompts.clean(complete(Prompts.translate(Languages.get(targetLang).englishName), Prompts.wrap(text), maxTokensFor(text) * 2, fast = false))
+        val out = Prompts.clean(complete(Prompts.translate(Languages.get(targetLang).englishName), Prompts.wrap(text), maxTokensFor(text) * 2, fast = false))
+        checked(text, out, AiOutputCheck.Kind.TRANSLATE, emptyList(), targetLang)
     }, onResult)
+
+    /** Answers that are clearly broken (another alphabet, random emoji, a different text) never reach the text field. */
+    private fun checked(text: String, out: String, kind: AiOutputCheck.Kind, langs: List<String>, target: String? = null): String {
+        val problem = AiOutputCheck.problem(text, out, kind, langs, target) ?: return out
+        throw AiException("The AI's answer didn't look right ($problem), so nothing was changed. If it keeps happening, try another model.")
+    }
 
     /**
      * Context-aware next-word ideas. Only the latest request is delivered, so fast typing
@@ -127,13 +136,17 @@ class AiAssistant(private val context: Context, private val settings: Settings) 
 
     /**
      * The user applied an AI fix: single-word typo fixes become personal autocorrect rules.
-     * Words the user typed on purpose (known words, slang) are never turned into rules.
+     * Words the user typed on purpose (known words, slang) are never turned into rules, and
+     * neither are slips the keyboard already fixes by itself ([fixedAnyway]).
      */
-    fun learnFromAcceptedFix(before: String, after: String, lexicon: UserLexicon, isKnownWord: (String) -> Boolean) {
+    fun learnFromAcceptedFix(
+        before: String, after: String, lexicon: UserLexicon,
+        isKnownWord: (String) -> Boolean, fixedAnyway: (String, String) -> Boolean = { _, _ -> false },
+    ) {
         for ((old, new) in TextDiff.wordFixes(before, after)) {
             val oldKey = TextUtils.key(old, lexicon.lang)
             val newKey = TextUtils.key(new, lexicon.lang)
-            if (oldKey == newKey || isKnownWord(oldKey)) continue
+            if (oldKey == newKey || isKnownWord(oldKey) || fixedAnyway(old, new)) continue
             lexicon.learnCorrection(oldKey, newKey)
         }
         SmartKeyboardApp.of(context).store.incrementStat("ai_fixes_applied")

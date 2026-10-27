@@ -59,7 +59,7 @@ Type Arabic with Latin letters and numbers, the way people chat: `7abibi → ح�
 - Emoji suggestions that replace the word when you tap them (`sob` → 😭, `pizza` → 🍕, `liebe` → ❤️, `hahaha`/`هههه` → 😂), for swiped words too. The emoji panel opens on your recently used emoji.
 
 ### Offline AI — on your phone
-- **No key, no internet, nothing leaves the phone.** Download one model once (Settings → AI assistant → Offline AI): **Gemma 4 E2B** (Google, best quality in English, German, Arabic and 140+ languages, 2 GB, fast on flagships such as the Galaxy S24), **Qwen 3 1.7B** (1 GB) or **Qwen 3 0.6B** (345 MB). Runs with Google's LiteRT-LM runtime on the GPU or CPU.
+- **No key, no internet, nothing leaves the phone.** Download one model once (Settings → AI assistant → Offline AI): **Gemma 4 E2B** (Google, best quality in English, German, Arabic and 140+ languages, 2.6 GB, fast on flagships such as the Galaxy S24), **Qwen 3 1.7B** (1 GB) or **Qwen 3 0.6B** (345 MB). Runs with Google's LiteRT-LM runtime on the GPU or CPU; a quick self-test on first load skips a chip that gives garbled answers, and every AI answer is checked (right alphabet, no random emoji, still your text) before it may change anything.
 - **Gemini Nano** is used on phones where Android has it built in (AICore).
 - Everything AI works with it: chill proofreading, rewrites, translation, voice tidy-up. With an online provider it can also step in automatically when there's no internet.
 
@@ -91,16 +91,17 @@ On simulated thumb typing (`AdaptiveKeysBenchmarkTest`), "Balanced" cuts mistype
 - **11 languages**, each with its own layout, dictionary, slang and swear words, and its own learned data: English, German (QWERTZ, ä ö ü ß), Arabic (with Arabic-Indic digits option), French (AZERTY), Spanish, Italian, Portuguese, Turkish, Dutch, Russian and Polish. Switch with 🌐.
 - **Looks**: 25 themes plus Material You, Auto (light/dark) and **your own colours** (background with optional gradient, keys, letters, any accent colour), your own background picture, 7 key fonts, capital letters on keys, key shadows, swipe trail colour (accent, rainbow, letters) and thickness, key shape/gap/height/letter size, number row, flat or key-background style.
 - **Your own shortcuts**: only the ones you add ("omw" → "On my way!"), offered as a suggestion or expanded on space — never anything built in.
-- **Sync between phones**: everything the keyboard learned, end-to-end encrypted (AES-256, your passphrase) in one file you keep in Google Drive or any folder.
+- **Sync between phones**: everything the keyboard learned plus your settings, end-to-end encrypted (AES-256, your passphrase) in one file you keep in Google Drive or any folder. A fresh install that picks the file again gets everything back.
+- **Updates from inside the app** (Settings → Updates & backup): downloads the newest release from GitHub and installs it over the old one, keeping your settings, words and offline model.
 - **Works with every app's enter key**: Send in Snapchat, WhatsApp and other chats, Search, Go, Next, Done. Long-press enter for a new line.
 - **Switch-keyboard button** on the right of the suggestion bar: tap to pick another keyboard app, hold to jump to the next one (can be hidden).
 - **Haptics that feel right**: crisp clicks from your phone's precise haptic engine (Crisp, Soft, Classic or exactly like the System keyboard), lighter ticks that speed up with held delete, and a cursor tick only when the cursor really moves.
 - **Quality of life**: long-press for accents, numbers and symbols; slide on space to move the cursor; swipe left from ⌫ to delete whole words; double-space for a full stop; smart punctuation spacing; clipboard history with pins (password clips are skipped); emoji panel with skin tones; sound with adjustable volume; incognito mode.
-- **Your data**: everything learned stays on the phone. Manage your words, learned fixes and blocked words, export or import a backup, or reset.
+- **Your data**: everything learned stays on the phone. Manage your own words, learned fixes and blocked words, save or restore a backup (settings, words, fixes, shortcuts), or reset.
 
 ## Privacy
 
-Typing, suggestions, autocorrect, swipe, Arabizi and all learning run on the device. The internet permission is only used by the optional online AI features, which talk directly to the provider you configure with your own key, and to download an offline model once if you choose one. With offline AI nothing is sent anywhere. Voice typing uses the phone's speech recogniser (the on-device one when available) and the microphone only while the 🎤 panel is open. Sync files are encrypted on the phone with your passphrase before they're saved. Nothing is ever learned from, or sent to an AI from, password fields, incognito mode or apps that ask for no personalised learning. Learned data is excluded from Android cloud backups; use the built-in export instead.
+Typing, suggestions, autocorrect, swipe, Arabizi and all learning run on the device. The internet permission is only used by the optional online AI features, which talk directly to the provider you configure with your own key, to download an offline model once if you choose one, and to look for app updates on GitHub. With offline AI nothing is sent anywhere. Voice typing uses the phone's speech recogniser (the on-device one when available) and the microphone only while the 🎤 panel is open. Sync files are encrypted on the phone with your passphrase before they're saved. Nothing is ever learned from, or sent to an AI from, password fields, incognito mode or apps that ask for no personalised learning. Learned data is excluded from Android cloud backups; use the built-in export instead.
 
 ## Project layout
 

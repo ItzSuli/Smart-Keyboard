@@ -24,17 +24,11 @@ enum class OfflineModel(
     /** Qwen 3 thinks out loud unless asked not to. */
     val noThinkHint: Boolean = false,
 ) {
-    GEMMA4_E2B_GPU(
-        "gemma4-e2b-gpu", "Gemma 4 E2B · GPU",
-        "Google's on-device model: the best quality in English, German, Arabic and 140+ languages. Fastest on flagships with a strong graphics chip, like the Galaxy S24 and newer.",
-        "litert-community/gemma-4-E2B-it-litert-lm", "gemma-4-E2B-it-gpu.litertlm", 2_008_432_640L,
-        "a53a59001894c58e6bdb5b9b227709f91a2e3e556baa7d85acf9c55402ba5cf5", preferGpu = true,
-    ),
-    GEMMA4_E2B_CPU(
-        "gemma4-e2b-cpu", "Gemma 4 E2B · CPU",
-        "The same model built for the processor: works on more phones, a bit slower.",
+    GEMMA4_E2B(
+        "gemma4-e2b", "Gemma 4 E2B",
+        "Google's on-device model: the best quality in English, German, Arabic and 140+ languages. Uses the graphics chip on flagships like the Galaxy S24 and newer, the processor elsewhere.",
         "litert-community/gemma-4-E2B-it-litert-lm", "gemma-4-E2B-it.litertlm", 2_588_147_712L,
-        "181938105e0eefd105961417e8da75903eacda102c4fce9ce90f50b97139a63c", preferGpu = false,
+        "181938105e0eefd105961417e8da75903eacda102c4fce9ce90f50b97139a63c", preferGpu = true,
     ),
     QWEN3_1_7B(
         "qwen3-1.7b", "Qwen 3 1.7B",
@@ -53,7 +47,20 @@ enum class OfflineModel(
     val sizeLabel: String get() = if (sizeBytes >= 1_000_000_000L) "%.1f GB".format(sizeBytes / 1e9) else "${(sizeBytes + 500_000) / 1_000_000} MB"
 
     companion object {
-        fun of(id: String?): OfflineModel? = entries.firstOrNull { it.id == id }
+        fun of(id: String?): OfflineModel? = entries.firstOrNull { it.id == current(id ?: "") }
+
+        /**
+         * Ids saved by older versions. The CPU Gemma file is today's Gemma. The "GPU" Gemma file
+         * was a build meant for browsers that answers with gibberish on phones, so it's gone.
+         */
+        fun current(id: String): String = when (id) {
+            "gemma4-e2b-cpu" -> GEMMA4_E2B.id
+            OBSOLETE_GEMMA_ID -> ""
+            else -> id
+        }
+
+        const val OBSOLETE_GEMMA_ID = "gemma4-e2b-gpu"
+        const val OBSOLETE_GEMMA_FILE = "gemma-4-E2B-it-gpu.litertlm"
     }
 }
 
@@ -72,7 +79,17 @@ class OfflineModelStore(private val context: Context) {
     fun delete(model: OfflineModel) {
         cancelDownload(model)
         file(model).delete()
-        prefs.edit().remove("verified_" + model.id).apply()
+        prefs.edit().remove("verified_" + model.id).remove("broken_backend_" + model.id).apply()
+    }
+
+    /** Frees the space taken by model files older versions downloaded that no longer work. */
+    fun removeObsolete() {
+        val id = OfflineModel.OBSOLETE_GEMMA_ID
+        val download = prefs.getLong(id, -1L)
+        if (download >= 0) runCatching { downloads.remove(download) }
+        prefs.edit().remove(id).remove("verified_$id").apply()
+        File(dir, OfflineModel.OBSOLETE_GEMMA_FILE).delete()
+        File(dir, OfflineModel.OBSOLETE_GEMMA_FILE + ".part").delete()
     }
 
     // ---- downloading (Android's download manager: resumes, shows progress, keeps going in the background)

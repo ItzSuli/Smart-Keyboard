@@ -482,6 +482,7 @@ class InputLogic(private val service: SmartKeyboardService) {
         val e = engine ?: return
         val now = System.currentTimeMillis()
         if (word.any { it.isWhitespace() }) return
+        val shouting = isShouting(word)
         if (word.any { it in '\u0600'..'\u06FF' }) {
             // Arabic written on this Latin keyboard (Arabizi): it belongs to the Arabic model.
             val m = arabiziModel ?: return
@@ -490,7 +491,7 @@ class InputLogic(private val service: SmartKeyboardService) {
         }
         worker.execute {
             val target = e.mix.learnTarget(TextUtils.key(word, lang), e.mix.weights(recent))
-            e.models[target].learn(word, ctx, now)
+            e.models[target].learn(word, ctx, now, shouting = shouting)
             app.store.incrementStat(if (fromSwipe) "words_swiped" else "words_typed")
             // Where does this person really hit each key? Align taps with the final letters.
             val sp = spatial ?: return@execute
@@ -505,6 +506,18 @@ class InputLogic(private val service: SmartKeyboardService) {
             }
             if (touchUpdates > 60) saveTouchModel()
         }
+    }
+
+    /**
+     * True when [word], just written, is in capitals like the word before it: a shouted message
+     * (caps lock), which says nothing about how the user normally writes the word.
+     */
+    private fun isShouting(word: String): Boolean {
+        if (TextUtils.caseOf(word) != TextUtils.Case.UPPER) return false
+        val before = textBefore(80).toString().trimEnd { !TextUtils.isWordChar(it) }
+        if (!before.endsWith(word)) return false
+        val previous = before.dropLast(word.length).trimEnd { !TextUtils.isWordChar(it) }.takeLastWhile { TextUtils.isWordChar(it) }
+        return TextUtils.caseOf(previous) == TextUtils.Case.UPPER
     }
 
     private fun saveTouchModel() {
@@ -739,8 +752,12 @@ class InputLogic(private val service: SmartKeyboardService) {
                     val recent = recentWords()
                     val rejected = result.autoCorrect?.text
                     val rejectedBy = resultAutoLanguage
+                    // The keyboard's own first idea for a typo: picking it teaches nothing new.
+                    val obviousFix = result.typed == typed &&
+                        (rejected == s.text || result.candidates.firstOrNull { it.kind == Suggestion.Kind.CORRECTION }?.text == s.text)
                     commit(s.text + " ")
                     resetComposing(finish = false)
+                    val shouting = isShouting(s.text)
                     val e = engine
                     if (e != null && allowLearning) worker.execute {
                         val typedKey = TextUtils.key(typed, lang)
@@ -753,11 +770,12 @@ class InputLogic(private val service: SmartKeyboardService) {
                             s.kind == Suggestion.Kind.TYPED -> {
                                 if (rejected != null) (e.models.getOrNull(rejectedBy) ?: e.primary).user
                                     .learnRejection(typedKey, TextUtils.key(rejected, lang))
-                                e.models[e.mix.learnTarget(typedKey, weights)].learn(s.text, ctx, System.currentTimeMillis(), confirmed = true)
+                                e.models[e.mix.learnTarget(typedKey, weights)].learn(s.text, ctx, System.currentTimeMillis(), confirmed = true, shouting = shouting)
                                 return@execute
                             }
-                            // Picking a fix for a non-word teaches the corrector this typo.
-                            !fromSwipe && s.kind == Suggestion.Kind.CORRECTION && !e.isKnownAnywhere(typedKey) && typedKey != pickedKey ->
+                            // Picking a fix the keyboard didn't think of first teaches it this typo.
+                            // Ordinary slips it already fixes ("wat" → "what") aren't worth keeping.
+                            !fromSwipe && !obviousFix && s.kind == Suggestion.Kind.CORRECTION && !e.isKnownAnywhere(typedKey) && typedKey != pickedKey ->
                                 e.models[e.mix.learnTarget(pickedKey, weights)].user.learnCorrection(typedKey, pickedKey)
                         }
                     }
@@ -1106,7 +1124,11 @@ class InputLogic(private val service: SmartKeyboardService) {
         worker.execute {
             // Typo fixes go to the language the text is written in.
             val target = e.mix.dominant(e.mix.weights(TextUtils.recentWords(fixed, lang)))
-            app.ai.learnFromAcceptedFix(original, fixed, e.models[target].user) { k -> e.isKnownAnywhere(k) }
+            app.ai.learnFromAcceptedFix(original, fixed, e.models[target].user, isKnownWord = { k -> e.isKnownAnywhere(k) }) { old, new ->
+                // A typo the keyboard already fixes by itself is an ordinary slip, not worth keeping.
+                val r = e.mixed.suggest(old, old.map { TypedChar(it) }, ContextWords(null, null, false), emptyList(), AutoCorrectMode.NORMAL).result
+                TextUtils.key(r.autoCorrect?.text ?: return@learnFromAcceptedFix false, lang) == TextUtils.key(new, lang)
+            }
         }
     }
 

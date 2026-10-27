@@ -70,6 +70,7 @@ import com.itzsuli.smartkeyboard.data.AiAutoProof
 import com.itzsuli.smartkeyboard.data.Languages
 import com.itzsuli.smartkeyboard.data.AiTone
 import com.itzsuli.smartkeyboard.data.Settings
+import com.itzsuli.smartkeyboard.data.SettingsBackup
 import com.itzsuli.smartkeyboard.engine.TextUtils
 import com.itzsuli.smartkeyboard.engine.UserLexicon
 import kotlinx.coroutines.Dispatchers
@@ -255,7 +256,7 @@ fun LearningScreen(onBack: () -> Unit, open: (String) -> Unit = {}) {
     val exporter = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri: Uri? ->
         if (uri != null) scope.launch {
             val ok = withContext(Dispatchers.IO) {
-                runCatching { context.contentResolver.openOutputStream(uri)?.use { it.write(app.store.exportJson().toByteArray()) } }.isSuccess
+                runCatching { context.contentResolver.openOutputStream(uri)?.use { it.write(SettingsBackup.fullBackup(app).toByteArray()) } }.isSuccess
             }
             Toast.makeText(context, if (ok) "Backup saved" else "Couldn't save backup", Toast.LENGTH_SHORT).show()
         }
@@ -265,10 +266,10 @@ fun LearningScreen(onBack: () -> Unit, open: (String) -> Unit = {}) {
             val n = withContext(Dispatchers.IO) {
                 runCatching {
                     val json = context.contentResolver.openInputStream(uri)?.use { it.readBytes().toString(Charsets.UTF_8) } ?: ""
-                    app.store.importJson(json).also { app.languages.reloadUserData() }
+                    SettingsBackup.restoreFull(app, json)
                 }.getOrElse { -1 }
             }
-            Toast.makeText(context, if (n >= 0) "Restored $n items" else "That file isn't a Smart Keyboard backup", Toast.LENGTH_SHORT).show()
+            Toast.makeText(context, if (n >= 0) "Restored your settings and $n learned items" else "That file isn't a Smart Keyboard backup", Toast.LENGTH_SHORT).show()
             version++
         }
     }
@@ -288,11 +289,11 @@ fun LearningScreen(onBack: () -> Unit, open: (String) -> Unit = {}) {
         item {
             Group("Stats") {
                 val words = lexicon?.allWords().orEmpty()
-                val personal = words.count { it.isConfirmed && !it.isBlocked }
-                val slang = words.count { it.isSlang && it.isConfirmed }
+                val known = words.count { it.isConfirmed && !it.isBlocked }
+                val own = words.count { it.isOwn }
                 FlowRow(Modifier.padding(12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    StatChip("$personal", "words known")
-                    StatChip("$slang", "own slang")
+                    StatChip("$known", "words used")
+                    StatChip("$own", "your own words")
                     StatChip("${lexicon?.allCorrections()?.size ?: 0}", "learned fixes")
                     stats.forEach { (k, label) -> StatChip("${statValues[k] ?: 0}", label) }
                 }
@@ -311,13 +312,14 @@ fun LearningScreen(onBack: () -> Unit, open: (String) -> Unit = {}) {
                     }) { Icon(Icons.Rounded.Add, "Add") }
                 }
                 OutlinedTextField(query, { query = it }, Modifier.fillMaxWidth().padding(horizontal = 12.dp), label = { Text("Search") }, singleLine = true)
+                // Only words that are really theirs: everyday words and typo fixes aren't listed.
                 val list = lexicon?.allWords().orEmpty()
-                    .filter { it.isConfirmed && !it.isBlocked && (query.isBlank() || it.key.contains(TextUtils.key(query, lang))) }
-                    .sortedWith(compareByDescending<UserLexicon.Word> { it.isManual || it.isSlang }.thenByDescending { it.count })
-                if (list.isEmpty()) Hint("Words you type that aren't in the dictionary (slang, names, shortcuts) show up here after you use them twice.")
+                    .filter { it.isOwn && (query.isBlank() || it.key.contains(TextUtils.key(query, lang))) }
+                    .sortedWith(compareByDescending<UserLexicon.Word> { it.isManual }.thenByDescending { it.count })
+                if (list.isEmpty()) Hint("Words you type that aren't in the dictionary (slang, names, shortcuts) show up here after you use them twice. Everyday words and typo fixes don't.")
                 list.take(150).forEach { w ->
                     WordRow(w.display, buildString {
-                        append(if (w.isManual) "added by you" else if (w.isSlang) "your slang" else "dictionary word")
+                        append(if (w.isManual) "added by you" else if (w.isSlang) "your slang" else "written your way")
                         append(" · used ${w.count}×")
                     }, onBlock = {
                         scope.launch { withContext(Dispatchers.IO) { lexicon?.block(w.display, System.currentTimeMillis()) }; version++ }
@@ -330,12 +332,16 @@ fun LearningScreen(onBack: () -> Unit, open: (String) -> Unit = {}) {
         item {
             Group("Learned fixes") {
                 val fixes = lexicon?.allCorrections().orEmpty().sortedByDescending { it.third }
-                if (fixes.isEmpty()) Hint("When you pick a correction or accept an AI fix, the keyboard remembers that typo and fixes it instantly next time.")
+                if (fixes.isEmpty()) Hint("When you pick a fix the keyboard didn't think of first, or accept an AI fix it couldn't have made, it remembers that typo. Ordinary slips it already fixes aren't saved.")
+                else Hint("Removing one only forgets it; the keyboard still fixes obvious typos by itself.")
                 fixes.take(100).forEach { (typed, target, count) ->
                     WordRow("$typed → $target", "learned $count×", onDelete = {
-                        scope.launch { withContext(Dispatchers.IO) { lexicon?.learnRejection(typed, target) }; version++ }
+                        scope.launch { withContext(Dispatchers.IO) { lexicon?.forgetCorrection(typed, target) }; version++ }
                     })
                 }
+                if (fixes.size > 1) TextButton(onClick = {
+                    scope.launch { withContext(Dispatchers.IO) { fixes.forEach { (t, target, _) -> lexicon?.forgetCorrection(t, target) } }; version++ }
+                }, modifier = Modifier.padding(horizontal = 4.dp)) { Text("Forget all ${fixes.size} fixes") }
             }
         }
         item {
@@ -354,7 +360,7 @@ fun LearningScreen(onBack: () -> Unit, open: (String) -> Unit = {}) {
         item {
             Group("Backup & sync") {
                 NavRow("Sync between phones", "End-to-end encrypted, through a file in Google Drive or any folder", Icons.Rounded.Sync) { open("sync") }
-                Hint("Moving to a new phone or reinstalling? Save your learned words and restore them later.")
+                Hint("Moving to a new phone or reinstalling? Save your settings, learned words and shortcuts in one file and restore them later. (API keys aren't included; sync carries them, encrypted.)")
                 Row(Modifier.padding(12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Button(onClick = { exporter.launch("smart-keyboard-backup.json") }) { Icon(Icons.Rounded.FileDownload, null); Text(" Export") }
                     OutlinedButton(onClick = { importer.launch(arrayOf("application/json", "text/plain", "*/*")) }) { Icon(Icons.Rounded.FileUpload, null); Text(" Import") }
@@ -419,7 +425,7 @@ fun AboutScreen(onBack: () -> Unit) {
             Group("Privacy") {
                 Hint("• Typing, suggestions, corrections, swipe and all learning run on your phone.\n" +
                     "• Learned data lives in the app's private storage and is excluded from cloud backups; export it yourself if you like.\n" +
-                    "• The internet permission is only used by the optional AI features, which talk directly to the provider you choose with your own key.\n" +
+                    "• The internet permission is only used by the optional AI features, which talk directly to the provider you choose with your own key, and to look for updates on GitHub (nothing about you is sent).\n" +
                     "• Password fields, incognito mode and apps that ask for no personalised learning are never learned from or sent to AI.")
             }
         }
@@ -434,3 +440,6 @@ fun AboutScreen(onBack: () -> Unit) {
         item { Spacer(Modifier.width(1.dp)) }
     }
 }
+
+/** Words that are the user's own: slang, names, words they added or always write their way. */
+private val UserLexicon.Word.isOwn get() = (isManual || isSlang || hasOwnCase) && isConfirmed && !isBlocked

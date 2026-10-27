@@ -19,6 +19,7 @@ import com.google.mlkit.genai.prompt.generateContentRequest
 import com.google.mlkit.genai.prompt.java.GenerativeModelFutures
 import com.itzsuli.smartkeyboard.data.OfflineModel
 import com.itzsuli.smartkeyboard.data.OfflineModelStore
+import com.itzsuli.smartkeyboard.engine.AiOutputCheck
 import java.util.concurrent.Executors
 import java.util.concurrent.ScheduledFuture
 import java.util.concurrent.TimeUnit
@@ -144,32 +145,52 @@ private class LiteRtRunner(context: Context, private val model: OfflineModel) : 
 
     init {
         val path = OfflineModelStore(context).file(model).absolutePath
-        val backends = if (model.preferGpu) listOf<() -> Backend>({ Backend.GPU() }, { Backend.CPU() })
-        else listOf({ Backend.CPU() }, { Backend.GPU() })
+        val prefs = context.getSharedPreferences("offline_models", Context.MODE_PRIVATE)
+        val brokenKey = "broken_backend_" + model.id
+        // A backend that failed the test last time is skipped (only one is ever marked).
+        val broken = prefs.getString(brokenKey, null)
+        val backends = (if (model.preferGpu) listOf("gpu", "cpu") else listOf("cpu", "gpu")).filter { it != broken }
         var started: Engine? = null
-        var error: Throwable? = null
-        for (backend in backends) {
+        var error: String? = null
+        for (name in backends) {
+            var e: Engine? = null
             try {
-                val e = Engine(EngineConfig(modelPath = path, backend = backend(), maxNumTokens = MAX_TOKENS, cacheDir = context.cacheDir.absolutePath))
+                e = Engine(EngineConfig(modelPath = path, backend = if (name == "gpu") Backend.GPU() else Backend.CPU(),
+                    maxNumTokens = MAX_TOKENS, cacheDir = context.cacheDir.absolutePath))
                 e.initialize()
+                // Some phones run a model on the GPU but get garbage out of it (wrong alphabets,
+                // random symbols). A tiny test answer catches that before it reaches any text.
+                val answer = LocalLlm.stripThinking(ask(e, CANARY_SYSTEM, CANARY_TEXT, 48))
+                val problem = AiOutputCheck.problem(CANARY_TEXT, answer, AiOutputCheck.Kind.REWRITE, listOf("de", "en"))
+                if (problem != null) {
+                    prefs.edit().putString(brokenKey, name).apply()
+                    error = "the ${name.uppercase()} gave a broken test answer ($problem)"
+                    e.close()
+                    continue
+                }
                 started = e
                 break
             } catch (t: Throwable) {
-                error = t
+                runCatching { e?.close() }
+                error = t.message ?: t.javaClass.simpleName
             }
         }
-        engine = started ?: throw AiException("Couldn't start ${model.label} on this phone: ${error?.message ?: "unknown error"}")
+        engine = started ?: throw AiException("${model.label} doesn't work on this phone: ${error ?: "unknown error"}. Try another model.")
     }
 
-    override fun generate(system: String, user: String, maxTokens: Int): String {
+    override fun generate(system: String, user: String, maxTokens: Int): String = ask(engine, system, user, maxTokens)
+
+    private fun ask(engine: Engine, system: String, user: String, maxTokens: Int): String {
         val config = ConversationConfig(
             systemInstruction = Contents.of(system),
-            samplerConfig = SamplerConfig(topK = 20, topP = 0.9, temperature = 0.2),
+            // Always the most likely word: fixing text needs no creativity, and sampling is what
+            // lets a small model drift into other languages.
+            samplerConfig = SamplerConfig(topK = 1, topP = 1.0, temperature = 0.0),
             maxOutputToken = maxTokens.coerceIn(16, MAX_TOKENS / 2),
             thinkingConfig = ThinkingConfig(false),
         )
         engine.createConversation(config).use { conversation ->
-            val reply = conversation.sendMessage(if (model.noThinkHint) "$user /no_think" else user)
+            val reply = conversation.sendMessage(if (model.noThinkHint) "$user /no_think" else user, extraContext = mapOf("enable_thinking" to false))
             return reply.contents.contents.filterIsInstance<Content.Text>().joinToString("") { it.text }
         }
     }
@@ -178,6 +199,8 @@ private class LiteRtRunner(context: Context, private val model: OfflineModel) : 
 
     companion object {
         private const val MAX_TOKENS = 2048
+        private const val CANARY_SYSTEM = "Repeat the user's message exactly as it is. Reply with the message only."
+        private const val CANARY_TEXT = "Hallo, wie geht's? Ich bin morgen leider nicht da."
     }
 }
 

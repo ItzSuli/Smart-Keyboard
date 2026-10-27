@@ -118,8 +118,8 @@ object PassphraseStore {
 }
 
 /**
- * Syncs what the keyboard learned between phones through one encrypted file the user picks
- * (for example in Google Drive, through Android's file picker). Each sync reads the file,
+ * Syncs what the keyboard learned, and its settings, between phones through one encrypted file
+ * the user picks (for example in Google Drive, through Android's file picker). Each sync reads the file,
  * merges it into this phone (nothing is ever lost: see [LearningStore.importJson]) and writes
  * the combined result back, so two phones pointed at the same file end up knowing the same.
  */
@@ -139,7 +139,11 @@ class SyncManager(private val context: Context, private val settings: Settings) 
         settings.set(Settings.SYNC_SECRET, PassphraseStore.seal(passphrase))
     }
 
-    fun setFile(uri: Uri?) = settings.set(Settings.SYNC_URI, uri?.toString())
+    fun setFile(uri: Uri?) {
+        settings.set(Settings.SYNC_URI, uri?.toString())
+        // The first sync with a file takes its settings (that's how a new install gets them back).
+        settings.set(Settings.SYNC_LAST, null)
+    }
 
     /** Runs a sync now (call from a background thread). */
     @Synchronized
@@ -151,11 +155,14 @@ class SyncManager(private val context: Context, private val settings: Settings) 
         var merged = 0
         val created = remote == null || remote.isEmpty()
         if (!created) {
-            merged = app.store.importJson(SyncCrypto.decrypt(remote!!, passphrase))
+            val json = SyncCrypto.decrypt(remote!!, passphrase)
+            merged = app.store.importJson(json)
+            // Learning merges; settings: the newest win, and the first sync on a phone takes the file's.
+            SettingsBackup.restore(json, settings, onlyIfNewer = settings.syncLast != 0L)
             app.languages.reloadUserData()
             app.shortcuts.reload()
         }
-        val out = SyncCrypto.encrypt(app.store.exportJson(forSync = true), passphrase)
+        val out = SyncCrypto.encrypt(SettingsBackup.attach(app.store.exportJson(forSync = true), settings, withSecrets = true), passphrase)
         (resolver.openOutputStream(uri, "wt") ?: error("Can't write the sync file")).use { it.write(out) }
         settings.set(Settings.SYNC_LAST, System.currentTimeMillis())
         Report(merged, created)

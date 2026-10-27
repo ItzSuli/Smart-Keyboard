@@ -128,13 +128,49 @@ class LanguageModel(val dict: BinaryDictionary, val user: UserLexicon) {
         return if (id >= 0) dict.words[id] else uw?.display ?: key
     }
 
+    /** The language pack's spelling of [key], or null if it doesn't know the word. */
+    fun dictDisplay(key: String): String? = dict.idOf(key).let { if (it >= 0) dict.words[it] else null }
+
+    /**
+     * The capitals a word typed in lowercase should get: the dictionary's (names, German nouns,
+     * "I") or those of a name the user taught. A habit of capitalising an ordinary word is never
+     * forced on it, and a user who writes a word in lowercase on purpose keeps it that way.
+     */
+    fun properCase(key: String): String {
+        val base = dictDisplay(key) ?: return display(key)
+        val uw = user.word(key)
+        if (uw != null && uw.hasOwnCase && TextUtils.caseOf(uw.display) == TextUtils.Case.LOWER) return uw.display
+        return base
+    }
+
+    /**
+     * Older versions learned "What" from the start of a sentence and then forced it on every
+     * "what". Puts the dictionary's form back on such words; capitals the user really writes
+     * (all-caps like "LOL", names) stay. Returns how many words were repaired.
+     */
+    fun repairLearnedCase(): Int {
+        var repaired = 0
+        for (w in user.allWords()) {
+            val base = dictDisplay(w.key) ?: continue
+            if (w.isManual || w.display == base) continue
+            val accidental = TextUtils.caseOf(w.display) == TextUtils.Case.CAPITALIZED && TextUtils.caseOf(base) == TextUtils.Case.LOWER
+            if (accidental) repaired++
+            user.setDisplay(w.key, if (accidental) base else w.display, base)
+        }
+        return repaired
+    }
+
     fun isKnown(key: String): Boolean = (dict.idOf(key) >= 0 && !user.isBlocked(key)) || user.isKnown(key)
 
     /** Records a committed word plus its context so future predictions follow the user's habits. */
-    fun learn(display: String, ctx: ContextWords, now: Long, confirmed: Boolean = false) {
+    fun learn(display: String, ctx: ContextWords, now: Long, confirmed: Boolean = false, shouting: Boolean = false) {
         val key = TextUtils.key(display, lang)
         if (key.isEmpty()) return
-        user.learnWord(display, dict.idOf(key) >= 0, now, confirmed)
+        // A capital at the start of a sentence (or capitals in a shouted message) are explained by
+        // where the word is, not by how the user writes it.
+        val atSentenceStart = ctx.sentenceStart && ctx.prev1 == null
+        val caseNeutral = shouting || (atSentenceStart && TextUtils.caseOf(display) == TextUtils.Case.CAPITALIZED)
+        user.learnWord(display, dictDisplay(key), now, confirmed, caseNeutral)
         val prev1 = ctx.prev1 ?: if (ctx.sentenceStart) START_TOKEN else null
         val prev2 = ctx.prev2 ?: if (ctx.prev1 != null && ctx.sentenceStart) START_TOKEN else null
         if (prev1 != null) {

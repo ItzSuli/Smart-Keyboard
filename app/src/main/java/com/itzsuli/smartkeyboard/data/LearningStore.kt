@@ -97,6 +97,7 @@ class LearningStore(context: Context) : UserLexicon.Listener {
 
     override fun onCorrection(lang: String, typed: String, target: String, count: Int) {
         enqueue("c|$lang|$typed|$target") { db ->
+            if (count <= 0) { db.delete("corrections", "lang=? AND typed=? AND target=?", arrayOf(lang, typed, target)); return@enqueue }
             db.insertWithOnConflict("corrections", null, ContentValues().apply {
                 put("lang", lang); put("typed", typed); put("target", target); put("count", count)
             }, SQLiteDatabase.CONFLICT_REPLACE)

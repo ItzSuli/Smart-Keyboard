@@ -42,6 +42,7 @@ import com.itzsuli.smartkeyboard.data.AiTone
 import com.itzsuli.smartkeyboard.data.OfflineModel
 import com.itzsuli.smartkeyboard.data.OfflineModelStore
 import com.itzsuli.smartkeyboard.data.Settings
+import com.itzsuli.smartkeyboard.engine.AiOutputCheck
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -195,16 +196,20 @@ fun OfflineAiScreen(onBack: () -> Unit) {
                             val r = withContext(Dispatchers.IO) {
                                 runCatching {
                                     OnDeviceProvider(context, e).complete(
-                                        Prompts.proofread("English", emptyList(), AiTone.CHILL), Prompts.wrap("i dont no wat u mean lol, teh movie was gud"), 64, false,
+                                        Prompts.proofread("English", emptyList(), AiTone.CHILL), Prompts.wrap(SAMPLE), 64, false,
                                     )
                                 }
                             }
                             val secs = (System.currentTimeMillis() - started) / 1000.0
-                            test = r.fold({ "“${Prompts.clean(it)}” — %.1f s".format(secs) }, { "✗ ${it.message}" })
+                            test = r.fold({
+                                val answer = Prompts.clean(it)
+                                val problem = AiOutputCheck.problem(SAMPLE, answer, AiOutputCheck.Kind.PROOFREAD, listOf("en"))
+                                "“$answer” — %.1f s".format(secs) + (problem?.let { p -> "\n⚠ Answers like this are thrown away ($p)." } ?: "")
+                            }, { "✗ ${it.message}" })
                         }
                     }, enabled = engine.isNotBlank()) { Text("Fix a test sentence") }
                 }
-                Hint(test ?: "Sends “i dont no wat u mean lol, teh movie was gud” to the offline model.")
+                Hint(test ?: "Sends “$SAMPLE” to the offline model.")
             }
         }
         item {
@@ -214,3 +219,5 @@ fun OfflineAiScreen(onBack: () -> Unit) {
         }
     }
 }
+
+private const val SAMPLE = "i dont no wat u mean lol, teh movie was gud"

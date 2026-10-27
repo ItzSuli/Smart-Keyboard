@@ -71,6 +71,7 @@ class LanguageManager(private val context: Context, private val store: LearningS
         val dict = context.assets.open("dict/$lang.dict").use { BinaryDictionary.load(it) }
         dict.trie // build the prefix tree now rather than on the first keystroke
         val model = LanguageModel(dict, lexicon(lang))
+        repairOnce(model)
         synchronized(this) {
             models[lang] = model
             while (models.size > MAX_LOADED) models.remove(models.keys.first())
@@ -79,6 +80,15 @@ class LanguageManager(private val context: Context, private val store: LearningS
     }
 
     fun runInBackground(task: () -> Unit) = executor.execute(task)
+
+    /** Fixes, once per phone, what older versions learned wrongly ("What" forced on every "what"). */
+    private fun repairOnce(model: LanguageModel) {
+        val prefs = context.getSharedPreferences("repairs", Context.MODE_PRIVATE)
+        val key = "learned_case_" + model.lang
+        if (prefs.getBoolean(key, false)) return
+        model.repairLearnedCase()
+        prefs.edit().putBoolean(key, true).apply()
+    }
 
     /** Everyday dialect/chat Arabic words, preferred when converting Arabizi. */
     val arabicChatWords: Set<String> by lazy {

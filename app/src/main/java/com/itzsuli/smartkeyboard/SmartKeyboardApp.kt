@@ -22,6 +22,11 @@ class SmartKeyboardApp : Application() {
     val emojiRecents by lazy { EmojiRecents(settings) }
     val sync by lazy { SyncManager(this, settings) }
 
+    override fun onCreate() {
+        super.onCreate()
+        Thread({ runCatching { com.itzsuli.smartkeyboard.data.OfflineModelStore(this).removeObsolete() } }, "cleanup").start()
+    }
+
     override fun onTrimMemory(level: Int) {
         super.onTrimMemory(level)
         // An offline AI model holds a lot of memory: give it back when the phone needs it.

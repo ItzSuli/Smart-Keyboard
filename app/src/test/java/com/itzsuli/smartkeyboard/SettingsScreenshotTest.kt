@@ -22,7 +22,12 @@ import java.io.File
 class SettingsScreenshotTest {
     @Test fun rendersSettingsScreens() {
         val out = File("build/screenshots").apply { mkdirs() }
-        for (section in listOf("home", "appearance", "typing", "languages", "ai", "learning", "about", "voice", "shortcuts", "tones", "sync", "offline_ai")) {
+        // A pretend newer release, so the update card and screen show.
+        val github = FakeHttpServer()
+        github.reply = org.json.JSONObject().put("tag_name", "v9.9.9").put("body", "- Better swipe\n- Fewer bugs").put("html_url", "https://example.invalid")
+            .put("assets", org.json.JSONArray().put(org.json.JSONObject().put("name", "SmartKeyboard-v9.9.9.apk").put("browser_download_url", "${github.baseUrl}/apk").put("size", 1))).toString()
+        com.itzsuli.smartkeyboard.data.Updater.apiBase = github.baseUrl
+        for (section in listOf("home", "appearance", "typing", "languages", "ai", "learning", "about", "voice", "shortcuts", "tones", "sync", "offline_ai", "updates")) {
             val intent = Intent(org.robolectric.RuntimeEnvironment.getApplication(), MainActivity::class.java)
             if (section != "home") intent.putExtra(MainActivity.EXTRA_SECTION, section)
             val controller = Robolectric.buildActivity(MainActivity::class.java, intent).setup()
@@ -40,5 +45,7 @@ class SettingsScreenshotTest {
             }
             controller.pause().stop().destroy()
         }
+        github.close()
+        com.itzsuli.smartkeyboard.data.Updater.apiBase = "https://api.github.com/repos/ItzSuli/Smart-Keyboard"
     }
 }

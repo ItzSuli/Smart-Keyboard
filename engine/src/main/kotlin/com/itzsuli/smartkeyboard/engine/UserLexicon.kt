@@ -19,6 +19,8 @@ class UserLexicon(val lang: String) {
         val isConfirmed get() = flags and (CONFIRMED or MANUAL) != 0 || count >= CONFIRM_COUNT
         val isSlang get() = flags and SLANG != 0
         val isManual get() = flags and MANUAL != 0
+        /** A dictionary word the user writes their own way ("LOL", "haus"), out of habit. */
+        val hasOwnCase get() = flags and OWN_CASE != 0
     }
 
     interface Listener {
@@ -40,6 +42,8 @@ class UserLexicon(val lang: String) {
     private val pairFollowers = HashMap<String, HashMap<String, Int>>()
     private val corrections = HashMap<String, HashMap<String, Int>>()
     private val rejections = HashMap<String, Int>()
+    /** A new way of writing a word, seen once; it takes over if the next use is the same. */
+    private val pendingCase = HashMap<String, String>()
 
     /** Words committed while learning was on (drives how much the user model is trusted). */
     var totalTokens: Long = 0
@@ -83,28 +87,44 @@ class UserLexicon(val lang: String) {
     // ---- learning ------------------------------------------------------------------------
 
     /**
-     * Records that the user committed [display]. [inBaseDictionary] marks whether the base
-     * language pack knows the word; unknown words become slang once confirmed.
+     * Records that the user committed [display]. [baseDisplay] is how the language pack writes
+     * the word, or null when it doesn't know it (such words become slang once confirmed).
+     * [caseNeutral] marks capitals the situation explains (a sentence start, caps lock): they say
+     * nothing about how the user writes the word, so they're never learned.
      */
-    @Synchronized fun learnWord(display: String, inBaseDictionary: Boolean, now: Long, confirmed: Boolean = false): Word {
+    @Synchronized fun learnWord(display: String, baseDisplay: String?, now: Long, confirmed: Boolean = false, caseNeutral: Boolean = false): Word {
         val key = TextUtils.key(display, lang)
-        val w = words.getOrPut(key) { Word(key, display, 0, now, 0) }
+        val written = if (caseNeutral) baseDisplay ?: TextUtils.lowercase(display, lang) else display
+        val w = words.getOrPut(key) { Word(key, baseDisplay ?: written, 0, now, 0) }
         w.count++
         w.lastUsed = now
-        // Keep the user's own spelling for slang; for dictionary words keep their preferred casing
-        // only once it is clearly a habit.
-        if (!inBaseDictionary || w.count >= CONFIRM_COUNT) w.display = preferredDisplay(w.display, display)
-        if (!inBaseDictionary) w.flags = w.flags or SLANG
+        // Another way of writing a word only takes over once it's a habit: the same form twice in
+        // a row. One "What" mid-sentence never turns every "what" into "What".
+        if (!caseNeutral && !w.isManual) {
+            when {
+                written == w.display -> pendingCase.remove(key)
+                pendingCase[key] == written -> { applyDisplay(w, written, baseDisplay); pendingCase.remove(key) }
+                else -> pendingCase[key] = written
+            }
+        }
+        if (baseDisplay == null) w.flags = w.flags or SLANG
         if (confirmed) w.flags = w.flags or CONFIRMED
         totalTokens++
         listener?.onWord(lang, w)
         return w
     }
 
-    private fun preferredDisplay(old: String, new: String): String {
-        // A sentence-initial capital says nothing about how the word is normally written.
-        if (new.length > 1 && new[0].isUpperCase() && new.substring(1).none { it.isUpperCase() } && old[0].isLowerCase()) return old
-        return new
+    /** Sets how [key] is written; [baseDisplay] is the dictionary's form (null if it has none). */
+    @Synchronized fun setDisplay(key: String, display: String, baseDisplay: String?) {
+        val w = words[key] ?: return
+        applyDisplay(w, display, baseDisplay)
+        pendingCase.remove(key)
+        listener?.onWord(lang, w)
+    }
+
+    private fun applyDisplay(w: Word, display: String, baseDisplay: String?) {
+        w.display = display
+        w.flags = if (baseDisplay != null && display != baseDisplay) w.flags or OWN_CASE else w.flags and OWN_CASE.inv()
     }
 
     @Synchronized fun addManualWord(display: String, now: Long) {
@@ -166,6 +186,14 @@ class UserLexicon(val lang: String) {
         listener?.onCorrection(lang, typed, target, c)
     }
 
+    /** Forgets a learned fix without blocking it: the keyboard may still make it by itself. */
+    @Synchronized fun forgetCorrection(typed: String, target: String) {
+        val m = corrections[typed] ?: return
+        if (m.remove(target) == null) return
+        if (m.isEmpty()) corrections.remove(typed)
+        listener?.onCorrection(lang, typed, target, 0)
+    }
+
     /** The user undid an autocorrection of [typed] into [target]. */
     @Synchronized fun learnRejection(typed: String, target: String) {
         val k = typed + SEP + target
@@ -177,7 +205,7 @@ class UserLexicon(val lang: String) {
 
     @Synchronized fun clear() {
         words.clear(); bigrams.clear(); trigrams.clear(); followers.clear(); headCounts.clear(); pairFollowers.clear()
-        corrections.clear(); rejections.clear(); totalTokens = 0
+        corrections.clear(); rejections.clear(); pendingCase.clear(); totalTokens = 0
         listener?.onCleared(lang)
     }
 
@@ -186,7 +214,7 @@ class UserLexicon(val lang: String) {
     /** Empties the in-memory copy only (used before reloading from storage). */
     @Synchronized fun resetMemory() {
         words.clear(); bigrams.clear(); trigrams.clear(); followers.clear(); headCounts.clear(); pairFollowers.clear()
-        corrections.clear(); rejections.clear(); totalTokens = 0
+        corrections.clear(); rejections.clear(); pendingCase.clear(); totalTokens = 0
     }
 
     @Synchronized fun restoreWord(key: String, display: String, count: Int, lastUsed: Long, flags: Int) {
@@ -223,6 +251,7 @@ class UserLexicon(val lang: String) {
         const val SLANG = 2
         const val BLOCKED = 4
         const val MANUAL = 8
+        const val OWN_CASE = 16
         /** Typing a word this many times teaches it, no questions asked. */
         const val CONFIRM_COUNT = 2
     }
