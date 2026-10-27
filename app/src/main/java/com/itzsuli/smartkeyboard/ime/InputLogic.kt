@@ -285,6 +285,19 @@ class InputLogic(private val service: SmartKeyboardService) {
         onSeparatorOrSymbol(text)
     }
 
+    /** Inserts text exactly as given (clipboard paste): no shift, no autocorrect, no learning. */
+    fun onPaste(text: String) {
+        val conn = ic ?: return
+        conn.beginBatchEdit()
+        if (composing.isNotEmpty()) commitComposing(autocorrect = false, separator = "")
+        commit(text)
+        conn.endBatchEdit()
+        autoSpaced = false
+        lastCorrection = null
+        service.updateShiftFromEditor()
+        refreshSuggestions()
+    }
+
     private fun onSeparatorOrSymbol(text: String) {
         val c = text[0]
         val conn = ic ?: return

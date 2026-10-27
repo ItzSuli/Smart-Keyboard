@@ -501,7 +501,7 @@ open class SmartKeyboardService : InputMethodService(), KeyboardView.Listener, S
     }
 
     private fun openClipboard() {
-        showPanel(ClipboardPanel(this, app.clipboard, theme, onPaste = { logic.onCharacter(it) }, onClose = { showKeyboard() }))
+        showPanel(ClipboardPanel(this, app.clipboard, theme, onPaste = { logic.onPaste(it) }, onClose = { showKeyboard() }))
     }
 
     private var aiOriginal: String? = null

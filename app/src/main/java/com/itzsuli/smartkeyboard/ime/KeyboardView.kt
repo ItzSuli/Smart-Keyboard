@@ -477,12 +477,24 @@ class KeyboardView(context: Context, private val overlay: KeyboardOverlay) : Vie
             Mode.SWIPE -> {
                 addSwipePoint(x, y)
                 overlay.trailEnd()
-                listener?.onSwipeEnd(swipeXs.copyOf(swipeCount), swipeYs.copyOf(swipeCount), swipeCount)
+                val quick = SystemClock.uptimeMillis() - p.downTime < SLIP_MAX_MS
+                if (quick && swipeLength() < unit * SLIP_MAX_UNITS) {
+                    // A fast finger slip across a key border while typing is a tap, not a gesture.
+                    finishTap(p, alreadyRemoved = true)
+                } else {
+                    listener?.onSwipeEnd(swipeXs.copyOf(swipeCount), swipeYs.copyOf(swipeCount), swipeCount)
+                }
             }
             Mode.DELETE_SWIPE -> listener?.onDeleteWordsCommit(p.deleteWords)
             else -> {}
         }
         invalidate()
+    }
+
+    private fun swipeLength(): Float {
+        var l = 0f
+        for (i in 1 until swipeCount) l += hypot(swipeXs[i] - swipeXs[i - 1], swipeYs[i] - swipeYs[i - 1])
+        return l
     }
 
     private fun finishTap(p: Pointer, alreadyRemoved: Boolean = false) {
@@ -548,5 +560,7 @@ class KeyboardView(context: Context, private val overlay: KeyboardOverlay) : Vie
         private const val SWIPE_PREVIEW_MS = 90L
         private const val DOUBLE_TAP_MS = 320L
         private const val DELETE_REPEAT_START = 380L
+        private const val SLIP_MAX_MS = 220L
+        private const val SLIP_MAX_UNITS = 1.15f
     }
 }
