@@ -9,7 +9,7 @@ data class Suggestion(
     val kind: Kind,
     val score: Float = 0f,
 ) {
-    enum class Kind { TYPED, EXACT, CORRECTION, COMPLETION, PREDICTION, LEARNED, EMOJI, AI }
+    enum class Kind { TYPED, EXACT, CORRECTION, COMPLETION, PREDICTION, LEARNED, EMOJI, AI, ARABIZI, SHORTCUT }
 }
 
 class SuggestionResult(

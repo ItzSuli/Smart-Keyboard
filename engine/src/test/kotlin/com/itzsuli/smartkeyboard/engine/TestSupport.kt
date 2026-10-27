@@ -35,6 +35,12 @@ object TestSupport {
         if (k != null) TypedChar(c, k.cx, k.cy) else TypedChar(c)
     }
 
+    /** Arabic everyday/dialect words shipped next to the Arabic dictionary. */
+    val arabicChat: Set<String> by lazy {
+        val root = System.getProperty("sk.assets") ?: "../app/src/main/assets"
+        File(root, "dict/ar.chat").readLines().filter { it.isNotBlank() }.toSet()
+    }
+
     /** Fresh model with an empty user lexicon. */
     fun model(lang: String = "en") = LanguageModel(dict(lang), UserLexicon(lang))
 

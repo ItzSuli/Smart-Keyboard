@@ -355,6 +355,59 @@ class KeyboardServiceTest {
         assertEquals(false, panelOpen(root))
     }
 
+    /** Types digits too (the test keyboard has a number row of long-press hints, so tap them as text). */
+    private fun typeArabizi(text: String) {
+        for (c in text) {
+            when {
+                c == ' ' -> tap(key(" "))
+                c.isDigit() -> { service.onKeyTap(com.itzsuli.smartkeyboard.ime.Key(c.toString(), KeyCode.TEXT, text = c.toString()), 0f, 0f); sync() }
+                else -> tap(key(c.lowercaseChar().toString()))
+            }
+            idle()
+        }
+    }
+
+    @Test fun arabiziBecomesArabic() {
+        waitUntil { service.logic.arabiziReady }
+        typeArabizi("7abibi ")
+        assertEquals("حبيبي ", text)
+        // Right after Arabic, plain Latin Arabizi converts too.
+        typeArabizi("kifak ")
+        assertEquals("حبيبي كيفك ", text)
+        // Backspace brings back what was typed, and it's remembered.
+        backspace()
+        assertEquals("حبيبي kifak", text)
+        typeArabizi(" ")
+        assertEquals("حبيبي kifak ", text)
+    }
+
+    @Test fun arabiziLeavesEnglishAlone() {
+        waitUntil { service.logic.arabiziReady }
+        typeArabizi("i think gr8 ")
+        assertEquals("I think gr8 ", text)
+        typeArabizi("salam ")
+        // Not English, but no Arabic around and no Arabizi digits: offered, not forced.
+        assertTrue(text, text.startsWith("I think gr8 sala") && text.none { it in '\u0600'..'\u06FF' })
+    }
+
+    @Test fun ownShortcutsAreOfferedOrExpanded() {
+        val app = org.robolectric.RuntimeEnvironment.getApplication() as SmartKeyboardApp
+        app.shortcuts.put("omw", "On my way!")
+        try {
+            type("omw ")
+            assertEquals("Omw ", text)
+            app.settings.set(Settings.SHORTCUTS_AUTO, true)
+            idle()
+            type("omw ")
+            assertEquals("Omw On my way! ", text)
+            backspace()
+            assertEquals("Omw omw", text)
+        } finally {
+            app.shortcuts.remove("omw")
+            app.settings.set(Settings.SHORTCUTS_AUTO, null)
+        }
+    }
+
     @Test fun learnsNewWordsAfterTwoUses() {
         // Whatever happens the first time, one undo is all it takes; after that the word is yours.
         type("ok skrrt ")

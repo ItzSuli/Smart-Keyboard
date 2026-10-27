@@ -327,6 +327,13 @@ def build_language(lang, cfg):
             f.write(struct.pack(">HHB", a, b, len(lst)))
             for d, q in lst:
                 f.write(struct.pack(">HB", d, q))
+    if lang == "ar":
+        # Everyday dialect/chat words: Arabizi ("7abibi", "kaman") is almost always dialect,
+        # while the frequency data leans towards formal Arabic, so the app prefers these.
+        in_vocab = {w for w, _ in vocab}
+        chat = sorted({w for w in load_extra(lang) if w in in_vocab})
+        with open(os.path.join(OUT_DICT, "ar.chat"), "w", encoding="utf-8") as f:
+            f.write("\n".join(chat) + "\n")
     size = os.path.getsize(out)
     n_bi = sum(len(l) for _, l in bigram_table)
     n_tri = sum(len(l) for _, _, l in trigram_table)

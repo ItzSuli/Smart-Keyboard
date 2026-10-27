@@ -9,6 +9,7 @@ import android.view.inputmethod.InputConnection
 import com.itzsuli.smartkeyboard.SmartKeyboardApp
 import com.itzsuli.smartkeyboard.data.AiAutoProof
 import com.itzsuli.smartkeyboard.data.EmojiData
+import com.itzsuli.smartkeyboard.engine.Arabizi
 import com.itzsuli.smartkeyboard.engine.AutoCorrectMode
 import com.itzsuli.smartkeyboard.engine.ContextWords
 import com.itzsuli.smartkeyboard.engine.KeyGeometry
@@ -96,6 +97,10 @@ class InputLogic(private val service: SmartKeyboardService) {
     private var resultAutoLanguage = -1
     private var stripList: List<Suggestion> = emptyList()
 
+    // ---- Arabizi ----
+    @Volatile private var arabizi: Arabizi? = null
+    @Volatile private var arabiziModel: LanguageModel? = null
+
     // ---- adaptive keys learning ----
     /** Taps where the adaptive keys typed a neighbour of the key under the finger: index → (under finger, typed). */
     private val tapOverrides = HashMap<Int, Pair<Char, Char>>()
@@ -110,6 +115,8 @@ class InputLogic(private val service: SmartKeyboardService) {
     /** Last autocorrection, so backspace can undo it. */
     private class LastCorrection(val typed: String, val committed: String, var separator: String, val language: Int)
     private var lastCorrection: LastCorrection? = null
+    /** A word brought back by undoing a correction: the next space keeps it exactly as typed. */
+    private var keepAsTyped: String? = null
     private var autoSpaced = false
     private var lastSpaceAt = 0L
     private var deleteSelectionAnchor = -1
@@ -166,6 +173,7 @@ class InputLogic(private val service: SmartKeyboardService) {
         lang = code
         val wanted = listOf(code) + settings.mixedLanguagesFor(code)
         activeLanguages = wanted
+        setUpArabizi(code)
         val loaded = wanted.mapNotNull { app.languages.loaded(it) }
         if (loaded.size == wanted.size) {
             attachModels(loaded)
@@ -180,6 +188,22 @@ class InputLogic(private val service: SmartKeyboardService) {
                     attachModels(models.filterNotNull())
                     refreshSuggestions()
                 }
+            }
+        }
+    }
+
+    /** Arabizi works on Latin keyboards when Arabic is one of the languages. */
+    private fun setUpArabizi(code: String) {
+        if (!(settings.arabizi && "ar" in settings.languages && code in com.itzsuli.smartkeyboard.data.Settings.LATIN_SCRIPT)) {
+            arabizi = null
+            arabiziModel = null
+            return
+        }
+        if (arabizi != null) return
+        app.languages.load("ar") { m ->
+            if (lang == code && settings.arabizi && arabizi == null) {
+                arabiziModel = m
+                arabizi = Arabizi(m, app.languages.arabicChatWords)
             }
         }
     }
@@ -229,6 +253,7 @@ class InputLogic(private val service: SmartKeyboardService) {
         composing.setLength(0)
         touches.clear()
         tapOverrides.clear()
+        keepAsTyped = null
         composingFromSwipe = false
         swipeAlternatives = emptyList()
         result = SuggestionResult.EMPTY
@@ -311,7 +336,10 @@ class InputLogic(private val service: SmartKeyboardService) {
         val override = pendingOverride
         pendingOverride = null
         val text = applyShift(raw)
-        val isWordPart = text.all { TextUtils.isWordChar(it) } &&
+        // With Arabizi, 2 3 5 6 7 8 9 are letters ("7abibi"), unless they continue a number.
+        val arabiziDigit = arabizi != null && text.length == 1 && text[0] in Arabizi.DIGITS &&
+            (composing.isNotEmpty() || textBefore(1).let { it.isEmpty() || !it[0].isDigit() })
+        val isWordPart = (text.all { TextUtils.isWordChar(it) } || arabiziDigit) &&
             !(text == "'" && composing.isEmpty()) // a lone apostrophe starts a quote, not a word
         if (isWordPart && allowSuggestions) {
             // A letter tapped right after a swiped word starts a new word ("hello" + "I" → "hello I").
@@ -419,11 +447,13 @@ class InputLogic(private val service: SmartKeyboardService) {
         val ctx = contextWords()
         var final = typed
         var autoLanguage = -1
-        if (autocorrect && allowAutocorrect && !composingFromSwipe) {
+        if (autocorrect && allowAutocorrect && !composingFromSwipe && typed != keepAsTyped) {
             if (result.typed == typed) {
                 result.autoCorrect?.let { final = it.text; autoLanguage = resultAutoLanguage }
-            } else engine?.mixed?.suggest(typed, touches.toList(), ctx, recentWords(), settings.autoCorrectMode)?.let { r ->
-                r.result.autoCorrect?.let { final = it.text; autoLanguage = r.autoLanguage }
+            } else engine?.let { e ->
+                // Typed faster than suggestions came back: decide right here.
+                val d = decide(e, typed, touches.toList(), ctx, recentWords(), settings.autoCorrectMode, wordSurroundings())
+                d.result.autoCorrect?.let { final = it.text; autoLanguage = d.autoLanguage }
             }
         }
         val typedTouches = touches.toList()
@@ -433,7 +463,7 @@ class InputLogic(private val service: SmartKeyboardService) {
         for ((i, pair) in tapOverrides) if (final.getOrNull(i)?.lowercaseChar() == pair.second) hitboxLearning.kept(pair.first, pair.second)
         commit(final + separator)
         resetComposing(finish = false)
-        learn(final, ctx, recent, typedTouches, fromSwipe)
+        if (autoLanguage != SHORTCUT) learn(final, ctx, recent, typedTouches, fromSwipe)
         if (final == typed) return null
         app.store.incrementStat("autocorrections")
         return LastCorrection(typed, final, separator, autoLanguage).also { lastCorrection = it }
@@ -444,6 +474,13 @@ class InputLogic(private val service: SmartKeyboardService) {
         if (!allowLearning) return
         val e = engine ?: return
         val now = System.currentTimeMillis()
+        if (word.any { it.isWhitespace() }) return
+        if (word.any { it in '\u0600'..'\u06FF' }) {
+            // Arabic written on this Latin keyboard (Arabizi): it belongs to the Arabic model.
+            val m = arabiziModel ?: return
+            worker.execute { m.learn(word, ctx, now) }
+            return
+        }
         worker.execute {
             val target = e.mix.learnTarget(TextUtils.key(word, lang), e.mix.weights(recent))
             e.models[target].learn(word, ctx, now)
@@ -520,9 +557,10 @@ class InputLogic(private val service: SmartKeyboardService) {
                 lc.typed.forEach { touches.add(TypedChar(it)) }
                 setComposing(composing)
                 conn.endBatchEdit()
+                keepAsTyped = lc.typed
                 // Remembered right away (cheap, in memory), so the very next space respects it.
                 val e = engine
-                if (e != null && allowLearning) {
+                if (e != null && allowLearning && lc.language != SHORTCUT) {
                     // Remembered by the language that made the correction.
                     val m = e.models.getOrNull(lc.language) ?: e.primary
                     m.user.learnRejection(TextUtils.key(lc.typed, lang), TextUtils.key(lc.committed, lang))
@@ -595,9 +633,10 @@ class InputLogic(private val service: SmartKeyboardService) {
         if (after.isNotEmpty() && TextUtils.isWordChar(after[0])) return
         val before = textBefore(48).toString()
         var i = before.length
-        while (i > 0 && TextUtils.isWordCharAt(before, i - 1)) i--
+        val az = arabizi != null
+        while (i > 0 && (TextUtils.isWordCharAt(before, i - 1) || az && before[i - 1] in Arabizi.DIGITS)) i--
         val word = before.substring(i)
-        if (word.isEmpty() || word.length > 40 || word.any { it.isDigit() }) return
+        if (word.isEmpty() || word.length > 40 || (if (az) word.none { it.isLetter() } else word.any { it.isDigit() })) return
         conn.setComposingRegion(cursor - word.length, cursor)
         composing.append(word)
         word.forEach { touches.add(TypedChar(it)) }
@@ -694,6 +733,8 @@ class InputLogic(private val service: SmartKeyboardService) {
                         val pickedKey = TextUtils.key(s.text, lang)
                         val weights = e.mix.weights(recent)
                         when {
+                            // "7abibi" → the Arabic word they picked: remember their spelling.
+                            s.kind == Suggestion.Kind.ARABIZI -> arabizi?.learn(typed, s.text)
                             // The user insisted on exactly what they typed: learn it as their word.
                             s.kind == Suggestion.Kind.TYPED -> {
                                 if (rejected != null) (e.models.getOrNull(rejectedBy) ?: e.primary).user
@@ -706,7 +747,7 @@ class InputLogic(private val service: SmartKeyboardService) {
                                 e.models[e.mix.learnTarget(pickedKey, weights)].user.learnCorrection(typedKey, pickedKey)
                         }
                     }
-                    learn(s.text, ctx, recent, emptyList(), fromSwipe)
+                    if (s.kind != Suggestion.Kind.SHORTCUT) learn(s.text, ctx, recent, emptyList(), fromSwipe)
                 } else {
                     val before = textBefore(1)
                     if (before.isNotEmpty() && !before[0].isWhitespace() && before[0] !in "([{\"'“«") commit(" ")
@@ -750,6 +791,7 @@ class InputLogic(private val service: SmartKeyboardService) {
         val mode = if (allowAutocorrect) settings.autoCorrectMode else AutoCorrectMode.OFF
         val wantEmoji = settings.emojiSuggestions
         val textForAi = if (typed.isEmpty()) textBefore(400).toString() else ""
+        val around = if (typed.isEmpty()) null else wordSurroundings()
         worker.execute {
             if (gen != generation.get()) return@execute
             val list = ArrayList<Suggestion>(4)
@@ -761,9 +803,9 @@ class InputLogic(private val service: SmartKeyboardService) {
             } else if (swipeAlts.isNotEmpty()) {
                 swipeAlts.take(3).forEach { list.add(Suggestion(it, Suggestion.Kind.EXACT)) }
             } else {
-                val mixedResult = e.mixed.suggest(typed, typedTouches, ctx, recent, mode)
-                r = mixedResult.result
-                autoLanguage = mixedResult.autoLanguage
+                val d = decide(e, typed, typedTouches, ctx, recent, mode, around!!)
+                r = d.result
+                autoLanguage = d.autoLanguage
                 if (r.autoCorrect != null) {
                     list.add(r.autoCorrect!!)
                     autoIndex = 0
@@ -811,9 +853,81 @@ class InputLogic(private val service: SmartKeyboardService) {
         }
     }
 
+    /** What surrounds the word being typed, for Arabizi: Arabic context words and whether Arabic came just before. */
+    private class Surroundings(val arabicCtx: ContextWords, val afterArabic: Boolean)
+
+    private fun wordSurroundings(): Surroundings {
+        val before = textBeforeWord(80)
+        val lastLetter = before.lastOrNull { it.isLetter() }
+        return Surroundings(TextUtils.contextWords(before, "ar"), lastLetter != null && lastLetter in '\u0600'..'\u06FF')
+    }
+
+    private class Decision(val result: SuggestionResult, val autoLanguage: Int)
+
+    /**
+     * Suggestions and the space-bar choice for the word being typed: the user's own shortcut,
+     * Arabic for Arabizi, or the normal (mixed-language) suggestions.
+     */
+    private fun decide(
+        e: Engine, typed: String, typedTouches: List<TypedChar>, ctx: ContextWords, recent: List<String>,
+        mode: AutoCorrectMode, around: Surroundings,
+    ): Decision {
+        val shortcut = app.shortcuts.find(typed)
+        val az = arabizi
+        val clearlyArabizi = az != null && Arabizi.hasArabiziDigits(typed) && typed.lowercase() !in Arabizi.ENGLISH_LOOKALIKES
+        val normal = if (clearlyArabizi) null else e.mixed.suggest(typed, typedTouches, ctx, recent, mode)
+        var r = normal?.result ?: SuggestionResult(typed, emptyList(), null, false, LanguageModel.OOV)
+        var autoLanguage = normal?.autoLanguage ?: -1
+
+        // Arabizi: Arabic spellings, converted on space when it's clearly Arabizi.
+        if (az != null && typed.all { Arabizi.isArabiziChar(it) } && typed.any { it.isLetter() } && typed.lowercase() !in Arabizi.ENGLISH_LOOKALIKES) {
+            val latinKey = TextUtils.key(typed, lang)
+            val knownLatin = e.isKnownAnywhere(latinKey)
+            // Plain English/German words only get Arabic ideas while writing Arabic.
+            val arabic = if (knownLatin && !clearlyArabizi && !around.afterArabic) emptyList()
+            else az.convert(typed, around.arabicCtx, 3).map { Suggestion(it.arabic, Suggestion.Kind.ARABIZI) }
+            if (arabic.isNotEmpty()) {
+                val undone = e.primary.user.rejectionCount(latinKey, TextUtils.key(arabic[0].text, "ar")) > 0
+                val auto = mode != AutoCorrectMode.OFF && settings.arabiziAuto && !undone && !knownLatin &&
+                    (clearlyArabizi || around.afterArabic)
+                r = when {
+                    auto -> SuggestionResult(typed, arabic + r.candidates, arabic[0], r.typedIsValid, r.typedScore)
+                        .also { autoLanguage = ARABIZI }
+                    clearlyArabizi -> SuggestionResult(typed, arabic, null, false, r.typedScore)
+                    // A Latin word that could be Arabizi: offer the Arabic next to the normal ideas.
+                    else -> SuggestionResult(typed, insertAt(r.candidates, if (knownLatin) 2 else 1, arabic[0]), r.autoCorrect, r.typedIsValid, r.typedScore)
+                }
+            }
+        }
+
+        // The user's own shortcut comes first.
+        if (shortcut != null) {
+            val s = Suggestion(shortcut.text, Suggestion.Kind.SHORTCUT)
+            val others = r.candidates.filter { it.text != s.text }
+            r = if (settings.shortcutsAuto && mode != AutoCorrectMode.OFF) {
+                autoLanguage = SHORTCUT
+                SuggestionResult(typed, listOf(s) + others, s, r.typedIsValid, r.typedScore)
+            } else {
+                // Offered first; space keeps exactly what was typed (it's their word).
+                autoLanguage = -1
+                SuggestionResult(typed, listOf(s) + others, null, true, r.typedScore)
+            }
+        }
+        return Decision(r, autoLanguage)
+    }
+
+    private fun insertAt(list: List<Suggestion>, index: Int, s: Suggestion): List<Suggestion> {
+        val out = ArrayList(list.filter { it.text != s.text })
+        out.add(minOf(index, out.size), s)
+        return out
+    }
+
     // ------------------------------------------------------------------ swipe typing
 
     val swipeAllowed: Boolean get() = allowSuggestions && settings.swipeTyping
+
+    /** True once Arabizi can convert (used by tests). */
+    val arabiziReady: Boolean get() = arabizi != null
 
     /** True once the language pack and swipe index are ready (used by tests). */
     val isReady: Boolean get() = engine?.decoders != null
@@ -1032,6 +1146,10 @@ class InputLogic(private val service: SmartKeyboardService) {
 
     companion object {
         private const val DOUBLE_SPACE_MS = 600L
+        /** "Language" of a correction made by Arabizi (undo is remembered by the keyboard's own language). */
+        private const val ARABIZI = -2
+        /** "Language" of an expanded shortcut (undo is not held against it). */
+        private const val SHORTCUT = -3
         private const val TOUCH_KEY = "touch.model"
         private const val LIMIT = 3000
     }

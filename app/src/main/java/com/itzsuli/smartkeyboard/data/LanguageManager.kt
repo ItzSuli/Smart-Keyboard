@@ -80,6 +80,11 @@ class LanguageManager(private val context: Context, private val store: LearningS
 
     fun runInBackground(task: () -> Unit) = executor.execute(task)
 
+    /** Everyday dialect/chat Arabic words, preferred when converting Arabizi. */
+    val arabicChatWords: Set<String> by lazy {
+        runCatching { context.assets.open("dict/ar.chat").bufferedReader().readLines().filter { it.isNotBlank() }.toSet() }.getOrDefault(emptySet())
+    }
+
     /** Re-reads learned data (after a backup import or reset) into the live lexicons. */
     fun reloadUserData() {
         val all = synchronized(lexicons) { lexicons.values.toList() }

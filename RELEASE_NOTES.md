@@ -19,9 +19,3 @@ Smart Keyboard app and follow the two setup steps. Android 8.0+.
 
 ### Removed
 - One-handed mode.
-
-> **Note on updates:** this build is signed with a one-off key because the repository has no
-> signing secrets yet. Android only installs an update signed with the same key, so before
-> installing it: export your learned words (Settings → Your words & learning → Export),
-> uninstall the old version, install this APK and import them again. Adding the signing
-> secrets described in `docs/RELEASING.md` makes every future update install seamlessly.

@@ -110,6 +110,8 @@ class Settings(context: Context) {
     val emojiKey get() = bool(EMOJI_KEY, true)
     val arabicDigits get() = bool(ARABIC_DIGITS, false)
     val clipboardHistory get() = bool(CLIPBOARD, true)
+    /** Your own shortcuts expand on space (otherwise they're offered as a suggestion). */
+    val shortcutsAuto get() = bool(SHORTCUTS_AUTO, false)
 
     // ---- languages ----
     val languages: List<String> get() = str(LANGUAGES, "").split(',').filter { it.isNotBlank() }.ifEmpty { listOf("en") }
@@ -127,6 +129,14 @@ class Settings(context: Context) {
         if (code !in mix || code !in LATIN_SCRIPT) return emptyList()
         return mix.filter { it != code && it in LATIN_SCRIPT }
     }
+
+    /**
+     * Arabizi on Latin keyboards: "7abibi" → "حبيبي". On by default when Arabic is one of the
+     * keyboard languages.
+     */
+    val arabizi get() = bool(ARABIZI, "ar" in languages)
+    /** Convert clear Arabizi (words with 3, 7, 5... or right after Arabic) on space. */
+    val arabiziAuto get() = bool(ARABIZI_AUTO, true)
 
     val currentLanguage: String get() = str(CURRENT_LANGUAGE, languages.first()).takeIf { it in languages } ?: languages.first()
 
@@ -197,6 +207,9 @@ class Settings(context: Context) {
         const val LANGUAGES = "languages"
         const val CURRENT_LANGUAGE = "current_language"
         const val MIXED_LANGUAGES = "mixed_languages"
+        const val ARABIZI = "arabizi"
+        const val ARABIZI_AUTO = "arabizi_auto"
+        const val SHORTCUTS_AUTO = "shortcuts_auto"
         /** Languages that share the Latin keyboard letters and can be mixed. */
         val LATIN_SCRIPT = setOf("en", "de", "fr", "es", "it", "pt", "tr", "nl", "pl")
         const val LEARNING = "learning"
