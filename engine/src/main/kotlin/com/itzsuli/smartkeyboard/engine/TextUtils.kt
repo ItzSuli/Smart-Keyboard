@@ -109,6 +109,30 @@ object TextUtils {
     }
 }
 
+/**
+ * Lookup keys of the last [max] words in [text], oldest first (used to tell languages apart).
+ * A sentence end between words is marked with an empty string.
+ */
+fun TextUtils.recentWords(text: CharSequence, lang: String, max: Int = 8): List<String> {
+    val out = ArrayList<String>(max + 4)
+    var words = 0
+    var i = text.length - 1
+    while (i >= 0 && words < max) {
+        val c = text[i]
+        if (isWordCharAt(text, i)) {
+            val end = i + 1
+            while (i >= 0 && isWordCharAt(text, i)) i--
+            out.add(key(text.substring(i + 1, end), lang))
+            words++
+        } else {
+            if ((c == '.' || c == '!' || c == '?' || c == '\n' || c == '؟') && words > 0 && out.last().isNotEmpty()) out.add("")
+            i--
+        }
+    }
+    out.reverse()
+    return out
+}
+
 /** The two words before the cursor (lookup keys) and whether a new sentence starts there. */
 data class ContextWords(val prev2: String?, val prev1: String?, val sentenceStart: Boolean) {
     companion object {

@@ -20,6 +20,8 @@ class SuggestionResult(
     /** Applied when the user hits space or punctuation; null = keep what was typed. */
     val autoCorrect: Suggestion?,
     val typedIsValid: Boolean,
+    /** Language-model score of the typed word itself ([LanguageModel.OOV] if unknown). */
+    val typedScore: Float = LanguageModel.OOV,
 ) {
     companion object {
         val EMPTY = SuggestionResult("", emptyList(), null, false)
@@ -151,7 +153,7 @@ class Suggester(
             if (r != typedText && (capitalisedForm || display == "I") && common) Suggestion(r, Suggestion.Kind.CORRECTION, typedScore) else null
         } else null
 
-        return SuggestionResult(typedText, out, autoSuggestion ?: capitalisationFix, typedValid)
+        return SuggestionResult(typedText, out, autoSuggestion ?: capitalisationFix, typedValid, typedScore)
     }
 
     private fun mayAutoCorrect(word: String, key: String): Boolean {
@@ -164,10 +166,18 @@ class Suggester(
         return true
     }
 
+    /** Same word spelled differently: missing apostrophe/accents (dont, fur) or German ss/ae/oe/ue. */
     private fun sameLetters(a: String, b: String): Boolean {
         val fa = TextUtils.foldWord(a).filter { it.isLetter() }
         val fb = TextUtils.foldWord(b).filter { it.isLetter() }
-        return fa == fb
+        return fa == fb || transliterate(a) == transliterate(b)
+    }
+
+    private fun transliterate(w: String): String = buildString {
+        for (c in w) when (c) {
+            'ß' -> append("ss"); 'ä' -> append("ae"); 'ö' -> append("oe"); 'ü' -> append("ue")
+            else -> if (c.isLetter()) append(c)
+        }
     }
 
     private fun elisionPrefix(text: String): String {

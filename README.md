@@ -11,8 +11,8 @@ from you.
 | ![Keyboard](docs/screenshots/keyboard-light.png) | ![Swipe typing](docs/screenshots/swipe.png) | ![AI fix](docs/screenshots/ai-fix.png) |
 | **Themes** | **Arabic** | **Emoji** |
 | ![Sunset theme](docs/screenshots/theme-sunset.png) | ![Arabic layout](docs/screenshots/arabic.png) | ![Emoji panel](docs/screenshots/emoji.png) |
-| **Neon theme** | **German (QWERTZ)** | **Long-press accents** |
-| ![Neon theme](docs/screenshots/theme-neon.png) | ![German layout](docs/screenshots/german.png) | ![Accents](docs/screenshots/accents.png) |
+| **German on the English keyboard** | **German (QWERTZ)** | **Long-press accents** |
+| ![Mixed typing](docs/screenshots/mixed.png) | ![German layout](docs/screenshots/german.png) | ![Accents](docs/screenshots/accents.png) |
 
 <p align="center">
   <img src="docs/screenshots/settings-home.png" width="200" alt="Settings home">
@@ -34,6 +34,14 @@ from you.
 - **Backspace undoes any fix — and it's remembered.** Undo `teh → the` once and it will never touch `teh` again.
 - Benchmarked in `engine/src/test/.../AutocorrectBenchmarkTest.kt`: fixes 77 of 78 real-world misspellings (98.7 %) and leaves all 54 slang, swear and casual words in its "leave alone" list untouched.
 - Three modes: **Off**, **Chill** (default) and **Strict**.
+
+### Mixed typing: English and German on one keyboard
+Write German on the English keyboard (or any mix of Latin-script languages) without switching:
+- It notices which language you're writing from the last few words ("ich", "und", "the", "and" decide it almost instantly) and leans towards what you write most. New sentences can switch language.
+- Suggestions, next-word predictions, autocorrect and swipe all follow the current language. German words work without umlaut keys: `fur → für`, `mude → müde`, `strasse → Straße`, and long-press `u`, `a`, `o` or `s` gives `ü`, `ä`, `ö`, `ß` first.
+- It never pushes one language onto the other: `und` stays `und` in an English sentence, `fur` stays `fur` in "soft fur", `im` stays `im` in "ich bin im Kino".
+- Every word is learned into the language it belongs to, your slang is protected in both, and the AI proofreads "English and German" text as such.
+- Turn it on under **Languages → Mixed typing** (tap *Deutsch* while on the English keyboard). It's on by default when English and German are both enabled. Swipe accuracy on English words barely changes with German mixed in (95.0 % vs 95.7 % top-1, no context).
 
 ### Smart, learning suggestions
 - Completions and next-word predictions from a trigram language model built from everyday spoken language (subtitles) and conversational sentences.

@@ -92,6 +92,7 @@ class LanguageManager(private val context: Context, private val store: LearningS
     }
 
     companion object {
-        private const val MAX_LOADED = 2
+        // Keyboard language + a mixed-in one + the last other keyboard (e.g. en + de + ar).
+        private const val MAX_LOADED = 3
     }
 }

@@ -74,6 +74,21 @@ class Settings(context: Context) {
 
     // ---- languages ----
     val languages: List<String> get() = str(LANGUAGES, "").split(',').filter { it.isNotBlank() }.ifEmpty { listOf("en") }
+    /**
+     * Languages typed together on one keyboard (e.g. English + German on QWERTY). When the
+     * keyboard's language is one of them, the others are understood too, without switching.
+     * Default: English + German if both are enabled.
+     */
+    val mixedLanguages: List<String> get() = prefs.getString(MIXED_LANGUAGES, null)
+        ?.split(',')?.filter { it.isNotBlank() }
+        ?: if ("en" in languages && "de" in languages) listOf("en", "de") else emptyList()
+
+    fun mixedLanguagesFor(code: String): List<String> {
+        val mix = mixedLanguages
+        if (code !in mix || code !in LATIN_SCRIPT) return emptyList()
+        return mix.filter { it != code && it in LATIN_SCRIPT }
+    }
+
     val currentLanguage: String get() = str(CURRENT_LANGUAGE, languages.first()).takeIf { it in languages } ?: languages.first()
 
     // ---- learning & privacy ----
@@ -129,6 +144,9 @@ class Settings(context: Context) {
         const val CLIPBOARD = "clipboard"
         const val LANGUAGES = "languages"
         const val CURRENT_LANGUAGE = "current_language"
+        const val MIXED_LANGUAGES = "mixed_languages"
+        /** Languages that share the Latin keyboard letters and can be mixed. */
+        val LATIN_SCRIPT = setOf("en", "de", "fr", "es", "it", "pt", "tr", "nl", "pl")
         const val LEARNING = "learning"
         const val INCOGNITO = "incognito"
         const val AI_PROVIDER = "ai_provider"

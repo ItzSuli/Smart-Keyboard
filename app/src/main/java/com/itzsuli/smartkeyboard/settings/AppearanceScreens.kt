@@ -246,7 +246,38 @@ fun LanguagesScreen(onBack: () -> Unit) {
     val s = settings()
     val enabled by setting(Settings.LANGUAGES) { it.languages }
     val current by setting(Settings.CURRENT_LANGUAGE) { it.currentLanguage }
+    val mixed by setting(Settings.MIXED_LANGUAGES) { it.mixedLanguages }
     SettingsPage("Languages", onBack) {
+        item {
+            Group("Mixed typing") {
+                Hint("Pick the languages you mix. On any of their keyboards you can write all of them without switching — suggestions, corrections and swipe follow whichever language you're writing at that moment. Umlauts work without umlaut keys: “fur” becomes “für”, “strasse” becomes “Straße” when you're writing German.")
+                androidx.compose.foundation.layout.FlowRow(
+                    Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Languages.ALL.filter { it.code in Settings.LATIN_SCRIPT }.forEach { lang ->
+                        val on = lang.code in mixed
+                        androidx.compose.material3.FilterChip(
+                            selected = on,
+                            onClick = {
+                                var list = if (on) mixed - lang.code else mixed + lang.code
+                                // Adding German while typing on English means "German on my English keyboard".
+                                if (!on && current in Settings.LATIN_SCRIPT && current !in list) list = listOf(current) + list
+                                s.set(Settings.MIXED_LANGUAGES, list.distinct().joinToString(","))
+                            },
+                            label = { Text(lang.nativeName) },
+                            leadingIcon = if (on) { { Icon(Icons.Rounded.Check, null, Modifier.size(18.dp)) } } else null,
+                        )
+                    }
+                }
+                if (mixed.size >= 2) {
+                    val names = mixed.joinToString(" + ") { Languages.get(it).nativeName }
+                    Hint("Now: $names together. Tip: you only need one of them ticked as a keyboard below — e.g. keep the English layout and write German on it.")
+                } else {
+                    Hint("Pick at least two to mix them.")
+                }
+            }
+        }
         item {
             Group {
                 Hint("Tick every language you type in. Switch on the keyboard with the 🌐 key. Each language has its own layout, dictionary, slang list and its own learned words.")

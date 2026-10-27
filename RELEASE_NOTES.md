@@ -1,14 +1,17 @@
-## Smart Keyboard 1.0.0 — first release
+## Smart Keyboard 1.1.0 — mixed English + German typing
 
-**Install:** download `SmartKeyboard-v1.0.0.apk` below, open it on your phone, then open the
+**Install:** download `SmartKeyboard-v1.1.0.apk` below, open it on your phone, then open the
 Smart Keyboard app and follow the two setup steps. Android 8.0+.
 
-### Highlights
-- **Chill autocorrect**: fixes clear typos only (98.7 % of a real-world typo benchmark), and never touches slang, swearing or your own words. Backspace undoes a fix and it's remembered.
-- **Learns from you**: your words, slang, phrases, which fixes you like or undo, and even where you tap on each key.
-- **AI assistant** (optional, your own key: Gemini, Claude, OpenAI, Groq, OpenRouter, Ollama): chill proofreading per sentence, one-tap rewrites and translations, AI next-word ideas. Fixes you accept teach the on-device autocorrect.
-- **Swipe typing** with live preview and a smooth trail (96 % top-1 on the swipe benchmark).
-- **iPhone-style adaptive keys**: likely next letters get bigger invisible hit areas.
-- **11 languages** including English, German and Arabic, each with its own layout, dictionary and slang.
-- **Themes**: 11 presets, Material You, custom accent, background picture, key size and shape, one-handed mode.
-- Emoji panel with skin tones, emoji suggestions, clipboard history, space-bar cursor, swipe-to-delete words, incognito mode, backup and restore.
+### New: write German on the English keyboard
+- No switching: suggestions, autocorrect, swipe and predictions follow whichever language you're writing, detected from your last few words.
+- Umlauts without umlaut keys: `fur → für`, `mude → müde`, `strasse → Straße` (only while writing German), and long-press `u`/`a`/`o`/`s` gives `ü`/`ä`/`ö`/`ß` first.
+- Chill across languages: German words stay German inside English sentences and the other way round; undoing a correction counts for both languages.
+- Learns each word into the right language; the AI proofreads mixed English/German text.
+- Turn on under **Languages → Mixed typing** (on by default when English and German are both enabled).
+
+### Everything from 1.0
+- **Chill autocorrect** (98.7 % of a real-world typo benchmark fixed, slang and swearing untouched), backspace undo that's remembered.
+- **Learns from you**: words, slang, phrases, liked/undone fixes, where you tap.
+- **AI assistant** (optional, your own key: Gemini, Claude, OpenAI, Groq, OpenRouter, Ollama): chill proofreading, rewrites, translations, AI next-word ideas.
+- **Swipe typing**, **iPhone-style adaptive keys**, **11 languages**, **themes**, emoji, clipboard history, gestures, incognito, backup/restore.

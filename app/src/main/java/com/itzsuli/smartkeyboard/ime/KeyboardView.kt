@@ -218,6 +218,8 @@ class KeyboardView(context: Context, private val overlay: KeyboardOverlay) : Vie
                 labelPaint.typeface = Typeface.DEFAULT
                 labelPaint.textSize = r.height() * 0.3f * scale
                 val label = languageLabel.ifEmpty { key.label }
+                // Mixed languages make long labels ("Português · Nederlands"): shrink to fit.
+                while (labelPaint.measureText(label) > r.width() * 0.88f && labelPaint.textSize > 8 * density) labelPaint.textSize *= 0.92f
                 canvas.drawText(label, r.centerX(), r.centerY() - (labelPaint.descent() + labelPaint.ascent()) / 2, labelPaint)
                 return
             }

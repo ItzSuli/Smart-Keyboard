@@ -258,7 +258,7 @@ open class SmartKeyboardService : InputMethodService(), KeyboardView.Listener, S
     override fun onSharedPreferenceChanged(prefs: SharedPreferences?, key: String?) {
         if (keyboardView == null) return
         when (key) {
-            Settings.CURRENT_LANGUAGE, Settings.LANGUAGES -> { logic.setLanguage(settings.currentLanguage); rebuildLayout() }
+            Settings.CURRENT_LANGUAGE, Settings.LANGUAGES, Settings.MIXED_LANGUAGES -> { logic.setLanguage(settings.currentLanguage); rebuildLayout() }
             Settings.INCOGNITO -> { strip?.incognito = settings.incognito; currentInputEditorInfo?.let { logic.startInput(it, true) } }
             Settings.ONE_HANDED, Settings.KEY_HEIGHT, Settings.NUMBER_ROW -> { rebuildLayout(); showKeyboard() }
             Settings.EMOJI_KEY, Settings.SHOW_HINTS, Settings.ARABIC_DIGITS -> rebuildLayout()
@@ -283,7 +283,11 @@ open class SmartKeyboardService : InputMethodService(), KeyboardView.Listener, S
     private fun rebuildLayout() {
         val kv = keyboardView ?: return
         val lang = logic.lang
+        val mixed = settings.mixedLanguagesFor(lang)
+        val label = (listOf(lang) + mixed).joinToString(" · ") { Languages.get(it).nativeName }
         val opts = Layouts.Options(
+            mixedLanguages = mixed,
+            spaceLabel = label,
             numberRow = settings.numberRow,
             emojiKey = settings.emojiKey,
             languageKey = settings.languages.size > 1,
@@ -298,7 +302,7 @@ open class SmartKeyboardService : InputMethodService(), KeyboardView.Listener, S
             KeyboardLayout.Mode.PHONE -> Layouts.numbers(lang, opts, phone = true)
         }
         kv.enterIcon = enterIconFor(currentInputEditorInfo)
-        kv.languageLabel = Languages.get(lang).nativeName
+        kv.languageLabel = label
         kv.swipeEnabled = logic.swipeAllowed
         panelHost?.let { h -> h.layoutParams = h.layoutParams.apply { height = keyboardHeight() } }
         kv.post { kv.layout?.let { logic.onKeyboardLaidOut(it) } }
@@ -529,9 +533,9 @@ open class SmartKeyboardService : InputMethodService(), KeyboardView.Listener, S
         }
     }
 
-    override fun onAiProofread() = runAi("Fixing") { t, cb -> app.ai.proofread(t, logic.lang, cb) }
+    override fun onAiProofread() = runAi("Fixing") { t, cb -> app.ai.proofread(t, logic.activeLanguages, cb) }
 
-    override fun onAiRewrite(mode: Prompts.Rewrite) = runAi("Rewriting") { t, cb -> app.ai.rewrite(t, mode, logic.lang, cb) }
+    override fun onAiRewrite(mode: Prompts.Rewrite) = runAi("Rewriting") { t, cb -> app.ai.rewrite(t, mode, logic.activeLanguages, cb) }
 
     override fun onAiTranslate(lang: String) = runAi("Translating") { t, cb -> app.ai.translate(t, lang, cb) }
 

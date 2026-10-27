@@ -14,7 +14,10 @@ import com.itzsuli.smartkeyboard.engine.ContextWords
 import com.itzsuli.smartkeyboard.engine.KeyGeometry
 import com.itzsuli.smartkeyboard.engine.KeyInfo
 import com.itzsuli.smartkeyboard.engine.KeyPredictor
+import com.itzsuli.smartkeyboard.engine.LanguageMix
 import com.itzsuli.smartkeyboard.engine.LanguageModel
+import com.itzsuli.smartkeyboard.engine.MixedSuggester
+import com.itzsuli.smartkeyboard.engine.recentWords
 import com.itzsuli.smartkeyboard.engine.SpatialModel
 import com.itzsuli.smartkeyboard.engine.Suggester
 import com.itzsuli.smartkeyboard.engine.Suggestion
@@ -53,13 +56,28 @@ class InputLogic(private val service: SmartKeyboardService) {
     var isPassword = false; private set
 
     // ---- engine ----
-    @Volatile private var model: LanguageModel? = null
-    @Volatile private var suggester: Suggester? = null
-    @Volatile private var keyPredictor: KeyPredictor? = null
+    /**
+     * Everything needed to type in the keyboard's language plus any languages mixed into it
+     * (e.g. German on the English keyboard). Index 0 is the keyboard's own language.
+     */
+    private class Engine(
+        val models: List<LanguageModel>,
+        val mixed: MixedSuggester,
+        val predictors: List<KeyPredictor>,
+        val decoders: List<SwipeDecoder>?,
+    ) {
+        val mix: LanguageMix get() = mixed.mix
+        val primary: LanguageModel get() = models[0]
+        fun isKnownAnywhere(key: String) = models.any { it.isKnown(key) }
+    }
+
+    @Volatile private var engine: Engine? = null
     @Volatile var keyProbabilities: Map<Char, Float>? = null; private set
     private var spatial: SpatialModel? = null
-    private var swipeDecoder: SwipeDecoder? = null
+    private var geometry: KeyGeometry? = null
     private var geometryKey: String = ""
+    /** Languages typed on the current keyboard: its own first, then the mixed-in ones. */
+    var activeLanguages: List<String> = listOf("en"); private set
     val touchModel = TouchModel()
     private var touchUpdates = 0
 
@@ -74,10 +92,12 @@ class InputLogic(private val service: SmartKeyboardService) {
     /** Cursor positions our recent edits will produce; selection updates arrive late. */
     private val pendingCursors = ArrayDeque<Int>()
     private var result: SuggestionResult = SuggestionResult.EMPTY
+    /** Which language produced [result]'s autocorrection. */
+    private var resultAutoLanguage = -1
     private var stripList: List<Suggestion> = emptyList()
 
     /** Last autocorrection, so backspace can undo it. */
-    private class LastCorrection(val typed: String, val committed: String, var separator: String)
+    private class LastCorrection(val typed: String, val committed: String, var separator: String, val language: Int)
     private var lastCorrection: LastCorrection? = null
     private var autoSpaced = false
     private var lastSpaceAt = 0L
@@ -132,18 +152,31 @@ class InputLogic(private val service: SmartKeyboardService) {
 
     fun setLanguage(code: String) {
         lang = code
-        val loaded = app.languages.loaded(code)
-        if (loaded != null) attachModel(loaded) else {
-            model = null; suggester = null; keyPredictor = null
-            app.languages.load(code) { m -> if (lang == m.lang) { attachModel(m); refreshSuggestions() } }
+        val wanted = listOf(code) + settings.mixedLanguagesFor(code)
+        activeLanguages = wanted
+        val loaded = wanted.mapNotNull { app.languages.loaded(it) }
+        if (loaded.size == wanted.size) {
+            attachModels(loaded)
+            return
+        }
+        engine = null
+        val models = arrayOfNulls<LanguageModel>(wanted.size)
+        wanted.forEachIndexed { i, l ->
+            app.languages.load(l) { m ->
+                models[i] = m
+                if (activeLanguages == wanted && models.all { it != null }) {
+                    attachModels(models.filterNotNull())
+                    refreshSuggestions()
+                }
+            }
         }
     }
 
-    private fun attachModel(m: LanguageModel) {
-        model = m
-        suggester = Suggester(m, spatial).also { it.fixCapitalization = settings.fixCapitalization }
-        keyPredictor = KeyPredictor(m)
-        swipeDecoder?.let { d -> worker.execute { d.prepare(m.dict) } }
+    private fun attachModels(models: List<LanguageModel>) {
+        val suggesters = models.map { m -> Suggester(m, spatial).also { it.fixCapitalization = settings.fixCapitalization } }
+        val decoders = geometry?.let { g -> models.map { SwipeDecoder(g) } }
+        engine = Engine(models, MixedSuggester(LanguageMix(models), suggesters), models.map { KeyPredictor(it) }, decoders)
+        if (decoders != null) worker.execute { decoders.forEachIndexed { i, d -> d.prepare(models[i].dict) } }
     }
 
     /** Called whenever the letter keys move (new layout, rotation, resize). */
@@ -157,13 +190,9 @@ class InputLogic(private val service: SmartKeyboardService) {
         val geometry = KeyGeometry(letters.map { k ->
             KeyInfo(TextUtils.lowercase(k.label, layout.lang)[0], k.bounds.centerX(), k.bounds.centerY(), k.bounds.width(), k.bounds.height())
         })
+        this.geometry = geometry
         spatial = SpatialModel(geometry, touchModel)
-        val decoder = SwipeDecoder(geometry)
-        swipeDecoder = decoder
-        model?.let { m ->
-            suggester = Suggester(m, spatial).also { it.fixCapitalization = settings.fixCapitalization }
-            worker.execute { decoder.prepare(m.dict) }
-        }
+        engine?.let { attachModels(it.models) }
     }
 
     // ------------------------------------------------------------------ helpers
@@ -172,12 +201,16 @@ class InputLogic(private val service: SmartKeyboardService) {
 
     private fun textBefore(n: Int): CharSequence = ic?.getTextBeforeCursor(n, 0) ?: ""
 
-    private fun contextWords(): ContextWords {
-        // Composing text is part of what the editor reports; strip it.
-        val before = textBefore(80).toString()
-        val trimmed = if (composing.isNotEmpty() && before.endsWith(composing)) before.dropLast(composing.length) else before
-        return TextUtils.contextWords(trimmed, lang)
+    /** Text before the word being typed (the editor reports the composing word too; strip it). */
+    private fun textBeforeWord(n: Int): String {
+        val before = textBefore(n).toString()
+        return if (composing.isNotEmpty() && before.endsWith(composing)) before.dropLast(composing.length) else before
     }
+
+    private fun contextWords(): ContextWords = TextUtils.contextWords(textBeforeWord(80), lang)
+
+    /** The last few words, which tell mixed languages apart. */
+    private fun recentWords(): List<String> = TextUtils.recentWords(textBeforeWord(160), lang)
 
     private fun resetComposing(finish: Boolean) {
         if (finish && composing.isNotEmpty()) ic?.finishComposingText()
@@ -361,27 +394,33 @@ class InputLogic(private val service: SmartKeyboardService) {
         val typed = composing.toString()
         val ctx = contextWords()
         var final = typed
+        var autoLanguage = -1
         if (autocorrect && allowAutocorrect && !composingFromSwipe) {
-            val s = suggester
-            val r = if (result.typed == typed) result else s?.suggest(typed, touches.toList(), ctx, settings.autoCorrectMode) ?: SuggestionResult.EMPTY
-            r.autoCorrect?.let { final = it.text }
+            if (result.typed == typed) {
+                result.autoCorrect?.let { final = it.text; autoLanguage = resultAutoLanguage }
+            } else engine?.mixed?.suggest(typed, touches.toList(), ctx, recentWords(), settings.autoCorrectMode)?.let { r ->
+                r.result.autoCorrect?.let { final = it.text; autoLanguage = r.autoLanguage }
+            }
         }
         val typedTouches = touches.toList()
         val fromSwipe = composingFromSwipe
+        val recent = recentWords()
         commit(final + separator)
         resetComposing(finish = false)
-        learn(final, ctx, typed, typedTouches, fromSwipe)
+        learn(final, ctx, recent, typedTouches, fromSwipe)
         if (final == typed) return null
         app.store.incrementStat("autocorrections")
-        return LastCorrection(typed, final, separator).also { lastCorrection = it }
+        return LastCorrection(typed, final, separator, autoLanguage).also { lastCorrection = it }
     }
 
-    private fun learn(word: String, ctx: ContextWords, typed: String, typedTouches: List<TypedChar>, fromSwipe: Boolean) {
+    /** Learns a committed word into the language it belongs to (or the one being written). */
+    private fun learn(word: String, ctx: ContextWords, recent: List<String>, typedTouches: List<TypedChar>, fromSwipe: Boolean) {
         if (!allowLearning) return
-        val m = model ?: return
+        val e = engine ?: return
         val now = System.currentTimeMillis()
         worker.execute {
-            m.learn(word, ctx, now)
+            val target = e.mix.learnTarget(TextUtils.key(word, lang), e.mix.weights(recent))
+            e.models[target].learn(word, ctx, now)
             app.store.incrementStat(if (fromSwipe) "words_swiped" else "words_typed")
             // Where does this person really hit each key? Align taps with the final letters.
             val sp = spatial ?: return@execute
@@ -443,8 +482,10 @@ class InputLogic(private val service: SmartKeyboardService) {
                 setComposing(composing)
                 conn.endBatchEdit()
                 // Remembered right away (cheap, in memory), so the very next space respects it.
-                val m = model
-                if (m != null && allowLearning) {
+                val e = engine
+                if (e != null && allowLearning) {
+                    // Remembered by the language that made the correction.
+                    val m = e.models.getOrNull(lc.language) ?: e.primary
                     m.user.learnRejection(TextUtils.key(lc.typed, lang), TextUtils.key(lc.committed, lang))
                     app.store.incrementStat("corrections_undone")
                 }
@@ -569,30 +610,36 @@ class InputLogic(private val service: SmartKeyboardService) {
                 if (composing.isNotEmpty()) {
                     val typed = composing.toString()
                     val fromSwipe = composingFromSwipe
+                    val recent = recentWords()
+                    val rejected = result.autoCorrect?.text
+                    val rejectedBy = resultAutoLanguage
                     commit(s.text + " ")
                     resetComposing(finish = false)
-                    val m = model
-                    if (m != null && allowLearning) worker.execute {
+                    val e = engine
+                    if (e != null && allowLearning) worker.execute {
                         val typedKey = TextUtils.key(typed, lang)
                         val pickedKey = TextUtils.key(s.text, lang)
+                        val weights = e.mix.weights(recent)
                         when {
                             // The user insisted on exactly what they typed: learn it as their word.
                             s.kind == Suggestion.Kind.TYPED -> {
-                                result.autoCorrect?.let { m.user.learnRejection(typedKey, TextUtils.key(it.text, lang)) }
-                                m.learn(s.text, ctx, System.currentTimeMillis(), confirmed = true)
+                                if (rejected != null) (e.models.getOrNull(rejectedBy) ?: e.primary).user
+                                    .learnRejection(typedKey, TextUtils.key(rejected, lang))
+                                e.models[e.mix.learnTarget(typedKey, weights)].learn(s.text, ctx, System.currentTimeMillis(), confirmed = true)
                                 return@execute
                             }
                             // Picking a fix for a non-word teaches the corrector this typo.
-                            !fromSwipe && s.kind == Suggestion.Kind.CORRECTION && !m.isKnown(typedKey) && typedKey != pickedKey ->
-                                m.user.learnCorrection(typedKey, pickedKey)
+                            !fromSwipe && s.kind == Suggestion.Kind.CORRECTION && !e.isKnownAnywhere(typedKey) && typedKey != pickedKey ->
+                                e.models[e.mix.learnTarget(pickedKey, weights)].user.learnCorrection(typedKey, pickedKey)
                         }
                     }
-                    learn(s.text, ctx, typed, emptyList(), fromSwipe)
+                    learn(s.text, ctx, recent, emptyList(), fromSwipe)
                 } else {
                     val before = textBefore(1)
                     if (before.isNotEmpty() && !before[0].isWhitespace() && before[0] !in "([{\"'“«") commit(" ")
+                    val recent = recentWords()
                     commit(s.text + " ")
-                    learn(s.text, ctx, s.text, emptyList(), false)
+                    learn(s.text, ctx, recent, emptyList(), false)
                     if (s.kind == Suggestion.Kind.AI) app.store.incrementStat("ai_words_used")
                 }
                 autoSpaced = true
@@ -605,12 +652,11 @@ class InputLogic(private val service: SmartKeyboardService) {
     }
 
     fun onSuggestionLongPressed(s: Suggestion) {
-        val m = model ?: return
-        val key = TextUtils.key(s.text, lang)
-        worker.execute { m.user.block(s.text, System.currentTimeMillis()) }
+        val e = engine ?: return
+        // Blocked in every mixed language, so it can't sneak back in through the other one.
+        worker.execute { e.models.forEach { it.user.block(s.text, System.currentTimeMillis()) } }
         service.showStripMessage("Removed “${s.text}” from suggestions")
         main.postDelayed({ refreshSuggestions() }, 50)
-        if (key.isEmpty()) return
     }
 
     fun refreshSuggestions() {
@@ -620,11 +666,12 @@ class InputLogic(private val service: SmartKeyboardService) {
             keyProbabilities = null
             return
         }
-        val s = suggester ?: run { service.showSuggestions(emptyList(), -1); return }
-        val kp = keyPredictor
+        val e = engine ?: run { service.showSuggestions(emptyList(), -1); return }
         val typed = composing.toString()
         val typedTouches = touches.toList()
         val ctx = contextWords()
+        val recent = recentWords()
+        val keyboard = spatial?.geometry
         val shiftOn = service.shiftState != KeyboardView.ShiftState.OFF
         val swipeAlts = swipeAlternatives
         val mode = if (allowAutocorrect) settings.autoCorrectMode else AutoCorrectMode.OFF
@@ -635,12 +682,15 @@ class InputLogic(private val service: SmartKeyboardService) {
             val list = ArrayList<Suggestion>(4)
             var autoIndex = -1
             var r = SuggestionResult.EMPTY
+            var autoLanguage = -1
             if (typed.isEmpty()) {
-                s.predict(ctx, 3).forEach { p -> list.add(if (shiftOn) p.copy(text = TextUtils.capitalize(p.text, lang)) else p) }
+                e.mixed.predict(ctx, recent, 3).forEach { p -> list.add(if (shiftOn) p.copy(text = TextUtils.capitalize(p.text, lang)) else p) }
             } else if (swipeAlts.isNotEmpty()) {
                 swipeAlts.take(3).forEach { list.add(Suggestion(it, Suggestion.Kind.EXACT)) }
             } else {
-                r = s.suggest(typed, typedTouches, ctx, mode)
+                val mixedResult = e.mixed.suggest(typed, typedTouches, ctx, recent, mode)
+                r = mixedResult.result
+                autoLanguage = mixedResult.autoLanguage
                 if (r.autoCorrect != null) {
                     list.add(r.autoCorrect!!)
                     autoIndex = 0
@@ -658,10 +708,11 @@ class InputLogic(private val service: SmartKeyboardService) {
                     list.add(Suggestion(e, Suggestion.Kind.EMOJI))
                 }
             }
-            val probs = if (kp != null) runCatching { kp.nextChars(typed, ctx) }.getOrNull() else null
+            val probs = runCatching { e.mixed.nextChars(e.predictors, typed, ctx, recent) }.getOrNull()?.let { foldToKeys(it, keyboard) }
             main.post {
                 if (gen != generation.get()) return@post
                 result = r
+                resultAutoLanguage = autoLanguage
                 keyProbabilities = probs
                 stripList = list.take(3)
                 service.showSuggestions(stripList, autoIndex)
@@ -671,7 +722,7 @@ class InputLogic(private val service: SmartKeyboardService) {
             app.ai.cancelPredictions()
             return
         }
-        app.ai.predictNext(textForAi, lang) { words ->
+        app.ai.predictNext(textForAi, activeLanguages) { words ->
             if (gen != generation.get() || composing.isNotEmpty()) return@predictNext
             val merged = ArrayList(stripList)
             val fresh = words.filter { w -> merged.none { it.text.equals(w, ignoreCase = true) } }
@@ -692,25 +743,28 @@ class InputLogic(private val service: SmartKeyboardService) {
     val swipeAllowed: Boolean get() = allowSuggestions && settings.swipeTyping
 
     /** True once the language pack and swipe index are ready (used by tests). */
-    val isReady: Boolean get() = model != null && swipeDecoder != null
+    val isReady: Boolean get() = engine?.decoders != null
 
-    fun canSwipe(): Boolean = swipeAllowed && swipeDecoder != null && model != null
+    fun canSwipe(): Boolean = swipeAllowed && engine?.decoders != null
 
     fun onSwipeMove(xs: FloatArray, ys: FloatArray, count: Int) {
         if (!settings.swipePreview) return
-        val d = swipeDecoder ?: return
-        val m = model ?: return
+        val e = engine ?: return
+        val decoders = e.decoders ?: return
         val gen = swipeGeneration.incrementAndGet()
         val cx = xs.copyOf(count)
         val cy = ys.copyOf(count)
         val ctx = swipeContext()
+        val recent = swipeRecent()
         worker.execute {
             if (gen != swipeGeneration.get()) return@execute
-            val best = d.decode(cx, cy, count, m, ctx, limit = 1).firstOrNull() ?: return@execute
-            val word = applySwipeCase(m.display(best.key))
+            val best = e.mixed.decodeSwipe(decoders, cx, cy, count, ctx, recent, limit = 1).firstOrNull() ?: return@execute
+            val word = applySwipeCase(best.first)
             main.post { if (gen == swipeGeneration.get()) service.showSwipePreview(word) }
         }
     }
+
+    private fun swipeRecent(): List<String> = TextUtils.recentWords(textBefore(160), lang)
 
     private fun swipeContext(): ContextWords {
         if (composing.isNotEmpty()) {
@@ -728,19 +782,20 @@ class InputLogic(private val service: SmartKeyboardService) {
 
     fun onSwipeEnd(xs: FloatArray, ys: FloatArray, count: Int) {
         swipeGeneration.incrementAndGet()
-        val d = swipeDecoder ?: return
-        val m = model ?: return
+        val e = engine ?: return
+        val decoders = e.decoders ?: return
         val ctx = swipeContext()
+        val recent = swipeRecent()
         val gen = swipeGeneration.get()
         worker.execute {
-            val candidates = d.decode(xs, ys, count, m, ctx, limit = 6)
+            val candidates = e.mixed.decodeSwipe(decoders, xs, ys, count, ctx, recent, limit = 6)
             main.post {
                 if (gen != swipeGeneration.get()) return@post
                 if (candidates.isEmpty()) {
                     service.showStripMessage("Didn't catch that — try again")
                     return@post
                 }
-                val words = candidates.map { applySwipeCase(m.display(it.key)) }.distinct()
+                val words = candidates.map { applySwipeCase(it.first) }.distinct()
                 insertSwipedWord(words)
             }
         }
@@ -801,9 +856,13 @@ class InputLogic(private val service: SmartKeyboardService) {
     }
 
     private fun learnFromAi(original: String, fixed: String) {
-        val m = model ?: return
+        val e = engine ?: return
         if (!allowLearning) return
-        worker.execute { app.ai.learnFromAcceptedFix(original, fixed, m.user) { k -> m.isKnown(k) } }
+        worker.execute {
+            // Typo fixes go to the language the text is written in.
+            val target = e.mix.dominant(e.mix.weights(TextUtils.recentWords(fixed, lang)))
+            app.ai.learnFromAcceptedFix(original, fixed, e.models[target].user) { k -> e.isKnownAnywhere(k) }
+        }
     }
 
     /** After a sentence ends, quietly proofread it (suggest or auto-apply, per settings). */
@@ -827,7 +886,7 @@ class InputLogic(private val service: SmartKeyboardService) {
         val sentence = body.substring(start).trimStart()
         if (sentence.split(' ').count { it.isNotBlank() } < 3 || sentence.length > 400) return
         proofInFlight = true
-        app.ai.proofread(sentence, lang) { res ->
+        app.ai.proofread(sentence, activeLanguages) { res ->
             proofInFlight = false
             val fixed = res.getOrNull() ?: return@proofread
             if (fixed == sentence || fixed.isBlank()) return@proofread
@@ -876,6 +935,20 @@ class InputLogic(private val service: SmartKeyboardService) {
         aiChipFix = null
         aiUndo = null
         service.showAiChip(null)
+    }
+
+    /**
+     * Letters a mixed-in language has but this keyboard doesn't (ä, ö, ü, ß on QWERTY) count
+     * towards the key that types them (a, o, u, s).
+     */
+    private fun foldToKeys(probs: Map<Char, Float>, keyboard: KeyGeometry?): Map<Char, Float> {
+        if (keyboard == null || activeLanguages.size == 1) return probs
+        val out = HashMap<Char, Float>(probs.size)
+        for ((c, p) in probs) {
+            val k = if (c == ' ' || keyboard.hasKey(c)) c else TextUtils.fold(c)
+            out[k] = (out[k] ?: 0f) + p
+        }
+        return out
     }
 
     fun shutdown() {

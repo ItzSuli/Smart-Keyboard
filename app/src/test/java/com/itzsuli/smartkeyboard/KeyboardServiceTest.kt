@@ -54,6 +54,7 @@ class KeyboardServiceTest {
         app.settings.set(Settings.LANGUAGES, "en,de,ar")
         app.settings.set(Settings.CURRENT_LANGUAGE, "en")
         app.settings.set(Settings.ONBOARDING_DONE, true)
+        app.settings.set(Settings.MIXED_LANGUAGES, null)
         activity = Robolectric.buildActivity(Activity::class.java).setup().get()
         edit = EditText(activity)
         val container = FrameLayout(activity)
@@ -210,6 +211,28 @@ class KeyboardServiceTest {
         assertTrue(text, text.endsWith("skrrt skrrt skrrt "))
     }
 
+    @Test fun mixesGermanIntoTheEnglishKeyboard() {
+        // English + German are both enabled, so they are mixed by default.
+        assertEquals("English · Deutsch", keyboard.layout!!.keys.first { it.code == KeyCode.SPACE }.label)
+        // Long-press on u offers ü first (after the number).
+        assertEquals("ü", key("u").popup[1])
+        type("ich bin so mude. ")
+        assertEquals("Ich bin so müde. ", text)
+        type("danke fur alles. ")
+        assertTrue(text, text.endsWith("Danke für alles. "))
+        type("and then i said hello to the cat with soft fur ")
+        assertTrue(text, text.endsWith("And then I said hello to the cat with soft fur "))
+    }
+
+    @Test fun singleLanguageStillWorksWithMixingOff() {
+        val s = (org.robolectric.RuntimeEnvironment.getApplication() as SmartKeyboardApp).settings
+        s.set(Settings.MIXED_LANGUAGES, "")
+        idle(); waitUntil { service.logic.isReady }
+        assertEquals("English", keyboard.layout!!.keys.first { it.code == KeyCode.SPACE }.label)
+        type("i think teh ")
+        assertEquals("I think the ", text)
+    }
+
     @Test fun aiProofreadsFinishedSentencesTheChillWay() {
         FakeHttpServer().use { fake ->
             fake.reply = """{"choices":[{"message":{"role":"assistant","content":"Me and him go there tomorrow."}}]}"""
@@ -247,6 +270,11 @@ class KeyboardServiceTest {
         type("how are ")
         Thread.sleep(200); idle()
         shot("english_light")
+        // German on the English keyboard: German suggestions for a German sentence.
+        type(". ich bin so mu")
+        Thread.sleep(300); idle()
+        shot("mixed")
+        type("de ")
         // Swipe trail for "hello" as drawn mid-gesture.
         val overlay = findOverlay(root)!!
         val loc = IntArray(2).also { keyboard.getLocationInWindow(it) }

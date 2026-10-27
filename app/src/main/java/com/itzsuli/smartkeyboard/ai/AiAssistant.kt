@@ -39,14 +39,14 @@ class AiAssistant(private val context: Context, private val settings: Settings) 
         return p
     }
 
-    private fun slangFor(lang: String): List<String> {
-        val lexicon = SmartKeyboardApp.of(context).languages.lexicon(lang)
-        return lexicon.allWords()
+    /** The user's own words in every language being typed (mixed typing shares them). */
+    private fun slangFor(langs: List<String>): List<String> = langs.flatMap { lang ->
+        SmartKeyboardApp.of(context).languages.lexicon(lang).allWords()
             .filter { (it.isSlang || it.isManual) && it.isConfirmed && !it.isBlocked }
-            .sortedByDescending { it.count }
-            .take(60)
-            .map { it.display }
-    }
+    }.sortedByDescending { it.count }.map { it.display }.distinct().take(60)
+
+    /** "English", or "English and German" when languages are mixed on one keyboard. */
+    private fun languageName(langs: List<String>) = langs.map { Languages.get(it).englishName }.distinct().joinToString(" and ")
 
     private fun <T> run(task: () -> T, onResult: (Result<T>) -> Unit) {
         executor.execute {
@@ -55,15 +55,13 @@ class AiAssistant(private val context: Context, private val settings: Settings) 
         }
     }
 
-    fun proofread(text: String, lang: String, onResult: (Result<String>) -> Unit) = run({
-        val language = Languages.get(lang).englishName
-        val out = provider().complete(Prompts.proofread(language, slangFor(lang)), Prompts.wrap(text), maxTokensFor(text), fast = false)
+    fun proofread(text: String, langs: List<String>, onResult: (Result<String>) -> Unit) = run({
+        val out = provider().complete(Prompts.proofread(languageName(langs), slangFor(langs)), Prompts.wrap(text), maxTokensFor(text), fast = false)
         Prompts.clean(out).ifEmpty { text }
     }, onResult)
 
-    fun rewrite(text: String, mode: Prompts.Rewrite, lang: String, onResult: (Result<String>) -> Unit) = run({
-        val language = Languages.get(lang).englishName
-        Prompts.clean(provider().complete(Prompts.rewrite(mode, language, slangFor(lang)), Prompts.wrap(text), maxTokensFor(text) * 2, fast = false))
+    fun rewrite(text: String, mode: Prompts.Rewrite, langs: List<String>, onResult: (Result<String>) -> Unit) = run({
+        Prompts.clean(provider().complete(Prompts.rewrite(mode, languageName(langs), slangFor(langs)), Prompts.wrap(text), maxTokensFor(text) * 2, fast = false))
     }, onResult)
 
     fun translate(text: String, targetLang: String, onResult: (Result<String>) -> Unit) = run({
@@ -74,15 +72,14 @@ class AiAssistant(private val context: Context, private val settings: Settings) 
      * Context-aware next-word ideas. Only the latest request is delivered, so fast typing
      * never shows stale words; results are cached per context.
      */
-    fun predictNext(textBefore: String, lang: String, onResult: (List<String>) -> Unit) {
+    fun predictNext(textBefore: String, langs: List<String>, onResult: (List<String>) -> Unit) {
         val gen = predictionGeneration.incrementAndGet()
-        val key = "$lang|${textBefore.takeLast(160)}"
+        val key = "${langs.joinToString(",")}|${textBefore.takeLast(160)}"
         synchronized(predictionCache) { predictionCache[key] }?.let { onResult(it); return }
         executor.execute {
             if (gen != predictionGeneration.get()) return@execute
             val words = runCatching {
-                val language = Languages.get(lang).englishName
-                val out = provider().complete(Prompts.nextWords(language, slangFor(lang)), textBefore.takeLast(400), 40, fast = true)
+                val out = provider().complete(Prompts.nextWords(languageName(langs), slangFor(langs)), textBefore.takeLast(400), 40, fast = true)
                 parseWords(out)
             }.getOrDefault(emptyList())
             synchronized(predictionCache) { if (words.isNotEmpty()) predictionCache[key] = words }

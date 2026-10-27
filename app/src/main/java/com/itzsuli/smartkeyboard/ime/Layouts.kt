@@ -13,6 +13,10 @@ object Layouts {
         /** Label for the enter key ("⏎", "Go", "Send", ...). */
         val enterLabel: String = "⏎",
         val showHints: Boolean = true,
+        /** Languages mixed into this keyboard: their letters come first on long-press (ä ö ü ß). */
+        val mixedLanguages: List<String> = emptyList(),
+        /** Space bar label. */
+        val spaceLabel: String? = null,
     )
 
     private val LETTER_ROWS = mapOf(
@@ -67,7 +71,7 @@ object Layouts {
                 val hint = if (r == 0 && !o.numberRow && i < 10) digits[i].toString() else null
                 val popup = ArrayList<String>()
                 if (hint != null) popup.add(hint)
-                popup.addAll(popupFor(c, lang))
+                popup.addAll(popupFor(c, lang, o.mixedLanguages))
                 keys.add(Key(c.toString(), popup = popup, hint = if (o.showHints) hint else null))
             }
             if (r == 2) keys.add(Key("⌫", KeyCode.DELETE, width = if (lang == "ar") 1f else 1.5f, type = Key.Type.FUNCTION))
@@ -78,10 +82,10 @@ object Layouts {
         return KeyboardLayout(out, KeyboardLayout.Mode.ALPHABET, lang, language.rtl)
     }
 
-    private fun popupFor(c: Char, lang: String): List<String> {
+    private fun popupFor(c: Char, lang: String, mixed: List<String> = emptyList()): List<String> {
         if (lang == "ar") return ARABIC_POPUPS[c] ?: emptyList()
         if (lang == "ru") return CYRILLIC_POPUPS[c] ?: emptyList()
-        val preferred = PREFERRED[lang]?.get(c) ?: ""
+        val preferred = (listOf(lang) + mixed).joinToString("") { PREFERRED[it]?.get(c) ?: "" }.toList().distinct().joinToString("")
         val all = ACCENTS[c] ?: ""
         return (preferred + all.filter { it !in preferred }).map { it.toString() }
     }
@@ -102,7 +106,7 @@ object Layouts {
         keys.add(Key(comma, popup = listOf(";", ":", "'", "\"", "-", "_"), type = Key.Type.FUNCTION))
         if (o.languageKey) keys.add(Key("🌐", KeyCode.LANGUAGE, type = Key.Type.FUNCTION))
         val fixed = keys.sumOf { it.width.toDouble() }.toFloat() + 1f + 1.5f
-        keys.add(Key(Languages.get(lang).nativeName, KeyCode.SPACE, text = " ", width = units - fixed, type = Key.Type.SPACE))
+        keys.add(Key(o.spaceLabel ?: Languages.get(lang).nativeName, KeyCode.SPACE, text = " ", width = units - fixed, type = Key.Type.SPACE))
         val period = Key(".", popup = if (lang == "ar") listOf("؟", "!", "،", "؛", "?", "…", "-", "@", "#")
         else if (lang == "es") listOf("?", "!", "¿", "¡", "…", "-", "@", "#", "&", "%", "/")
         else listOf("?", "!", "…", "-", "@", "#", "&", "%", "/", "*", "+"), type = Key.Type.FUNCTION)
