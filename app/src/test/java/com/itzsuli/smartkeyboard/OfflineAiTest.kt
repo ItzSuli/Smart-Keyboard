@@ -69,7 +69,31 @@ class OfflineAiTest {
         assertTrue(LocalLlm.isLoaded)
         // Memory pressure lets the model go.
         app.onTrimMemory(android.content.ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW)
+        val end = System.currentTimeMillis() + 5_000
+        while (LocalLlm.isLoaded && System.currentTimeMillis() < end) Thread.sleep(10)
         assertFalse(LocalLlm.isLoaded)
+    }
+
+    @Test fun theKeyboardNeverWaitsForTheModelToLoad() {
+        // A model that takes 1.5 s to load, like a big one on a phone.
+        LocalLlm.factory = { _, _ ->
+            Thread.sleep(1500)
+            object : LocalLlm.Runner {
+                override fun generate(system: String, user: String, maxTokens: Int) = "ok"
+                override fun close() {}
+            }
+        }
+        app.settings.set(Settings.AI_PROVIDER, "ondevice")
+        app.settings.set(Settings.AI_AUTO_PROOF, com.itzsuli.smartkeyboard.data.AiAutoProof.SUGGEST)
+        // The keyboard opens, closes and opens again while the model is still loading.
+        val started = System.currentTimeMillis()
+        repeat(3) {
+            app.ai.warmUp()
+            LocalLlm.isLoaded
+        }
+        app.onTrimMemory(android.content.ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW)
+        val waited = System.currentTimeMillis() - started
+        assertTrue("main thread waited $waited ms", waited < 200)
     }
 
     @Test fun takesOverWhenTheInternetIsGone() {

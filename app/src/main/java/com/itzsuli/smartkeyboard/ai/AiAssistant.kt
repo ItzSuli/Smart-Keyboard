@@ -50,8 +50,8 @@ class AiAssistant(private val context: Context, private val settings: Settings) 
     fun warmUp() {
         if (ProviderPreset.of(settings.aiProvider) != ProviderPreset.ON_DEVICE || !settings.aiEnabled) return
         val model = com.itzsuli.smartkeyboard.data.OfflineModel.of(settings.offlineEngine) ?: return
-        if (LocalLlm.isLoaded) return
-        executor.execute { LocalLlm.warmUp(context, model) }
+        // Runs on its own low-priority thread; the keyboard never waits for it.
+        LocalLlm.warmUpAsync(context, model)
     }
 
     private fun provider(): AiProvider {

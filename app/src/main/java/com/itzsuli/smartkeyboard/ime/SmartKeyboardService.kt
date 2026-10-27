@@ -49,7 +49,6 @@ open class SmartKeyboardService : InputMethodService(), KeyboardView.Listener, S
     private var backgroundBitmap: Bitmap? = null
     private var mode = KeyboardLayout.Mode.ALPHABET
     private var panel: View? = null
-    private val emojiRecents = ArrayList<String>()
 
     var shiftState = KeyboardView.ShiftState.OFF
         private set
@@ -65,7 +64,6 @@ open class SmartKeyboardService : InputMethodService(), KeyboardView.Listener, S
         settings.prefs.registerOnSharedPreferenceChangeListener(this)
         haptics = Haptics(this, settings)
         audio = getSystemService(AudioManager::class.java)
-        emojiRecents.addAll(settings.prefs.getString(EMOJI_RECENTS, "")!!.split('\u0001').filter { it.isNotEmpty() })
         app.clipboard.enabled = settings.clipboardHistory
         app.clipboard.startListening()
         // Warm up the current language so the first keystrokes already get suggestions.
@@ -262,7 +260,7 @@ open class SmartKeyboardService : InputMethodService(), KeyboardView.Listener, S
             Settings.SWITCH_KEY -> strip?.switchKey = settings.switchKey
             Settings.VOICE_KEY -> strip?.voiceKey = settings.voiceKey
             // Bookkeeping, nothing to redraw.
-            EMOJI_RECENTS, Settings.SEEN_APPS, Settings.TONE_APPS, Settings.TONE_PER_APP, Settings.AI_TONE,
+            Settings.EMOJI_RECENTS, Settings.SEEN_APPS, Settings.TONE_APPS, Settings.TONE_PER_APP, Settings.AI_TONE,
             Settings.SYNC_LAST, Settings.SYNC_ERROR, Settings.SYNC_URI, Settings.SYNC_SECRET, Settings.SYNC_AUTO -> Unit
             else -> when {
                 key?.startsWith("ai_") == true -> strip?.aiAvailable = app.ai.isConfigured
@@ -521,9 +519,9 @@ open class SmartKeyboardService : InputMethodService(), KeyboardView.Listener, S
 
     private fun openEmoji() {
         val data = EmojiData.get(this)
-        val p = EmojiPanel(this, data, emojiRecents, onEmoji = { e ->
+        val p = EmojiPanel(this, data, app.emojiRecents.shown(), onEmoji = { e ->
             logic.onCharacter(e)
-            settings.prefs.edit().putString(EMOJI_RECENTS, emojiRecents.joinToString("\u0001")).apply()
+            app.emojiRecents.add(e)
         }, onBack = { showKeyboard() }, onDelete = { logic.onDelete() })
         p.applyTheme(theme)
         showPanel(p)
@@ -625,7 +623,6 @@ open class SmartKeyboardService : InputMethodService(), KeyboardView.Listener, S
 
     companion object {
         private const val TAG = "SmartKeyboard"
-        private const val EMOJI_RECENTS = "emoji_recents"
         const val BACKGROUND_FILE = "keyboard_background.jpg"
     }
 }

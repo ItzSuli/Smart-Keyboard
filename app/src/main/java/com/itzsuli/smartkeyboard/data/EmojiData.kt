@@ -9,8 +9,21 @@ class EmojiGroup(val name: String, val icon: String, val emoji: List<Emoji>)
 /** Emoji catalogue (Unicode emoji-test.txt), filtered to what this phone can draw. */
 class EmojiData private constructor(val groups: List<EmojiGroup>, private val byWord: Map<String, String>) {
 
-    /** An emoji for a typed word ("pizza" → 🍕, "liebe" → ❤️), if there is an obvious one. */
-    fun forWord(word: String): String? = byWord[word.lowercase()]
+    /**
+     * An emoji for a typed word ("pizza" → 🍕, "sob" → 😭, "liebe" → ❤️), if there is an obvious
+     * one. Laughter in any spelling ("hahaha", "looool", "xD", "هههه") and stretched words
+     * ("sooob", "loooove") count too.
+     */
+    fun forWord(word: String): String? {
+        val w = word.lowercase().trim('\'', '’')
+        if (w.isEmpty()) return null
+        byWord[w]?.let { return it }
+        for ((pattern, emoji) in PATTERNS) if (pattern.matches(w)) return emoji
+        if (w.length < 4) return null
+        val once = STRETCH.replace(w, "$1")
+        val twice = STRETCH.replace(w, "$1$1")
+        return byWord[once] ?: byWord[twice]
+    }
 
     companion object {
         @Volatile private var instance: EmojiData? = null
@@ -24,8 +37,43 @@ class EmojiData private constructor(val groups: List<EmojiGroup>, private val by
             "Travel & Places" to "✈️", "Activities" to "⚽", "Objects" to "💡", "Symbols" to "❤️", "Flags" to "🏳️",
         )
 
+        private val STRETCH = Regex("(.)\\1{2,}")
+
+        /** Laughter and other words people spell a hundred ways. */
+        private val PATTERNS = listOf(
+            Regex("(ha){2,}h?|a?(ha)+ha|(he){2,}h?|(hi){2,}|lo+l+|lo+o+l|lmf?a+o+|ro+fl|x+d+|(ja){2,}j?|(je){2,}|(ah){2,}|kek(w)?|ه{3,}|خخ+") to "😂",
+            Regex("(sob)+|(wa)+h+|w+a+h+|bu+hu+|(boo)+hoo") to "😭",
+            Regex("(<3)+|l+o+v+e+|i+ ?l+u+v+ ?u+") to "❤️",
+            Regex("(ugh)+h*|u+g+h+") to "😩",
+            Regex("y+a+y+") to "🥳",
+            Regex("o+mg+|o+m+g+") to "😱",
+            Regex("(z){3,}") to "😴",
+        )
+
         /** Hand-picked chat words in the supported languages. */
         private val KEYWORDS = mapOf(
+            // Crying, laughing and other feelings people text all the time.
+            "sob" to "😭", "sobbing" to "😭", "bawling" to "😭", "tears" to "😭", "weep" to "😭", "weeping" to "😭", "dying" to "💀",
+            "ded" to "💀", "rofl" to "🤣", "lmfao" to "🤣", "hehe" to "😁", "xd" to "😆", "smh" to "🤦", "facepalm" to "🤦",
+            "shrug" to "🤷", "idk" to "🤷", "ugh" to "😩", "bruh" to "😐", "meh" to "😑", "yay" to "🥳", "woohoo" to "🥳",
+            "hype" to "🔥", "slay" to "💅", "queen" to "👑", "king" to "👑", "pray" to "🙏", "praying" to "🙏", "blessed" to "😇",
+            "angel" to "😇", "devil" to "😈", "evil" to "😈", "scared" to "😨", "afraid" to "😨", "shocked" to "😱",
+            "surprised" to "😮", "nervous" to "😬", "awkward" to "😬", "cringe" to "😬", "oops" to "😅", "relieved" to "😌",
+            "yum" to "😋", "yummy" to "😋", "delicious" to "😋", "sleepy" to "😴", "bored" to "🥱", "ill" to "🤒", "puke" to "🤮",
+            "vomit" to "🤮", "gross" to "🤢", "nasty" to "🤢", "hot" to "🥵", "cold" to "🥶", "freezing" to "🥶", "nerd" to "🤓",
+            "genius" to "🧠", "brain" to "🧠", "mindblown" to "🤯", "lovely" to "🥰", "adorable" to "🥰", "hug" to "🤗",
+            "hugs" to "🤗", "wave" to "👋", "muscle" to "💪", "win" to "🏆", "winner" to "🏆", "done" to "✅", "nope" to "🙅",
+            "stop" to "✋", "wait" to "⏳", "late" to "⏰", "night" to "🌙", "goodnight" to "🌙", "gn" to "🌙", "morning" to "☀️",
+            "gm" to "☀️", "rainbow" to "🌈", "flower" to "🌸", "flowers" to "💐", "rose" to "🌹", "gift" to "🎁", "present" to "🎁",
+            "cake" to "🎂", "cheers" to "🥂", "wine" to "🍷", "drunk" to "🥴", "burger" to "🍔", "fries" to "🍟", "taco" to "🌮",
+            "sushi" to "🍣", "chocolate" to "🍫", "cookie" to "🍪", "popcorn" to "🍿", "movie" to "🎬", "film" to "🎬",
+            "book" to "📚", "study" to "📚", "school" to "🏫", "work" to "💼", "laptop" to "💻", "camera" to "📷", "photo" to "📸",
+            "selfie" to "🤳", "plane" to "✈️", "travel" to "✈️", "beach" to "🏖️", "holiday" to "🏖️", "vacation" to "🏖️",
+            "run" to "🏃", "running" to "🏃", "dance" to "💃", "dancing" to "💃", "sing" to "🎤", "basketball" to "🏀",
+            "boom" to "💥", "sparkle" to "✨", "magic" to "✨", "ghost" to "👻", "alien" to "👽", "clown" to "🤡", "chill" to "😎",
+            "smirk" to "😏", "wink" to "😉", "silly" to "😜", "shh" to "🤫", "secret" to "🤫", "liar" to "🤥", "nice" to "👌",
+            "great" to "👍", "good" to "👍", "lucky" to "🍀", "baby" to "👶", "pls" to "🥺", "plz" to "🥺", "beg" to "🥺",
+            "upset" to "😢", "hurt" to "💔", "heartbroken" to "💔", "broken" to "💔", "wtf" to "🤨",
             "love" to "❤️", "heart" to "❤️", "lol" to "😂", "lmao" to "😂", "haha" to "😂", "hahaha" to "😂", "funny" to "😂",
             "happy" to "😊", "smile" to "😊", "sad" to "😢", "cry" to "😭", "crying" to "😭", "fire" to "🔥", "lit" to "🔥",
             "ok" to "👌", "okay" to "👌", "yes" to "👍", "thanks" to "🙏", "thank" to "🙏", "please" to "🙏", "cool" to "😎",
@@ -39,6 +87,9 @@ class EmojiData private constructor(val groups: List<EmojiGroup>, private val by
             "crazy" to "🤪", "sus" to "🤨", "cap" to "🧢", "goat" to "🐐", "shit" to "💩", "poop" to "💩",
             // German
             "liebe" to "❤️", "herz" to "❤️", "danke" to "🙏", "bitte" to "🙏", "glücklich" to "😊", "traurig" to "😢",
+            "weinen" to "😭", "heul" to "😭", "heulen" to "😭", "wütend" to "😠", "sauer" to "😠", "umarmung" to "🤗",
+            "feiern" to "🎉", "nacht" to "🌙", "schlafen" to "😴", "geschenk" to "🎁", "blumen" to "💐", "urlaub" to "🏖️",
+            "strand" to "🏖️", "schule" to "🏫", "arbeit" to "💼", "super" to "👍", "toll" to "👍", "lecker" to "😋",
             "geil" to "🔥", "krass" to "🤯", "geburtstag" to "🎂", "kaffee" to "☕", "bier" to "🍺", "müde" to "😴",
             "hunger" to "🤤", "hallo" to "👋", "tschüss" to "👋", "fußball" to "⚽", "hund" to "🐶", "katze" to "🐱",
             "lach" to "😂", "lachen" to "😂", "sonne" to "☀️", "auto" to "🚗", "geld" to "💰", "kuss" to "😘",
@@ -46,6 +97,9 @@ class EmojiData private constructor(val groups: List<EmojiGroup>, private val by
             "حب" to "❤️", "احبك" to "❤️", "قلب" to "❤️", "شكرا" to "🙏", "هههه" to "😂", "ههههه" to "😂", "ههه" to "😂",
             "سعيد" to "😊", "حزين" to "😢", "نار" to "🔥", "قهوة" to "☕", "مرحبا" to "👋", "هلا" to "👋", "يلا" to "🏃",
             "والله" to "🤞", "ماشاءالله" to "🤩", "الحمدلله" to "🤲", "انشالله" to "🤲",
+            "حبيبي" to "❤️", "حبيبتي" to "❤️", "قلبي" to "❤️", "روحي" to "❤️", "زعلان" to "😢", "زعلانة" to "😢", "بكي" to "😭",
+            "تعبان" to "😩", "تعبانة" to "😩", "جوعان" to "🤤", "نايم" to "😴", "عيد" to "🎉", "مبروك" to "🎉", "صباح" to "☀️",
+            "ورد" to "🌹", "تمام" to "👌", "حلو" to "😍", "حلوة" to "😍",
             // French / Spanish / Italian / Turkish
             "amour" to "❤️", "merci" to "🙏", "mdr" to "😂", "amor" to "❤️", "gracias" to "🙏", "jaja" to "😂", "jajaja" to "😂",
             "grazie" to "🙏", "amore" to "❤️", "teşekkürler" to "🙏", "aşk" to "❤️",

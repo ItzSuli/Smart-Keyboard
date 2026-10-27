@@ -721,9 +721,16 @@ class InputLogic(private val service: SmartKeyboardService) {
         val ctx = contextWords()
         when (s.kind) {
             Suggestion.Kind.EMOJI -> {
-                if (composing.isNotEmpty()) commitComposing(autocorrect = false, separator = " ")
-                else if (!textBefore(1).endsWith(" ") && textBefore(1).isNotEmpty()) commit(" ")
-                commit(s.text + " ")
+                // The emoji takes the word's place: "sob" → "😭".
+                if (composing.isNotEmpty()) {
+                    commit(s.text + " ")
+                    resetComposing(finish = false)
+                } else {
+                    if (!textBefore(1).endsWith(" ") && textBefore(1).isNotEmpty()) commit(" ")
+                    commit(s.text + " ")
+                }
+                app.emojiRecents.add(s.text)
+                autoSpaced = true
             }
             else -> {
                 if (composing.isNotEmpty()) {
@@ -809,6 +816,11 @@ class InputLogic(private val service: SmartKeyboardService) {
                 e.mixed.predict(ctx, recent, 3).forEach { p -> list.add(if (shiftOn) p.copy(text = TextUtils.capitalize(p.text, lang)) else p) }
             } else if (swipeAlts.isNotEmpty()) {
                 swipeAlts.take(3).forEach { list.add(Suggestion(it, Suggestion.Kind.EXACT)) }
+                // Swiped words get their emoji too.
+                (if (wantEmoji) EmojiData.get(service) else null)?.forWord(swipeAlts[0])?.let { em ->
+                    while (list.size > 2) list.removeAt(list.size - 1)
+                    list.add(Suggestion(em, Suggestion.Kind.EMOJI))
+                }
             } else {
                 val d = decide(e, typed, typedTouches, ctx, recent, mode, around!!)
                 r = d.result
@@ -932,6 +944,9 @@ class InputLogic(private val service: SmartKeyboardService) {
     // ------------------------------------------------------------------ swipe typing
 
     val swipeAllowed: Boolean get() = allowSuggestions && settings.swipeTyping
+
+    /** What the suggestion bar shows right now (used by tests). */
+    val shownSuggestions: List<Suggestion> get() = stripList
 
     /** True once Arabizi can convert (used by tests). */
     val arabiziReady: Boolean get() = arabizi != null

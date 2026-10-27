@@ -4,6 +4,7 @@ import android.app.Application
 import android.content.Context
 import com.itzsuli.smartkeyboard.ai.AiAssistant
 import com.itzsuli.smartkeyboard.data.ClipboardHistory
+import com.itzsuli.smartkeyboard.data.EmojiRecents
 import com.itzsuli.smartkeyboard.data.LanguageManager
 import com.itzsuli.smartkeyboard.data.LearningStore
 import com.itzsuli.smartkeyboard.data.Settings
@@ -18,12 +19,13 @@ class SmartKeyboardApp : Application() {
     val ai by lazy { AiAssistant(this, settings) }
     val clipboard by lazy { ClipboardHistory(this) }
     val shortcuts by lazy { Shortcuts(store) }
+    val emojiRecents by lazy { EmojiRecents(settings) }
     val sync by lazy { SyncManager(this, settings) }
 
     override fun onTrimMemory(level: Int) {
         super.onTrimMemory(level)
         // An offline AI model holds a lot of memory: give it back when the phone needs it.
-        if (level >= TRIM_MEMORY_RUNNING_LOW) com.itzsuli.smartkeyboard.ai.LocalLlm.release()
+        if (level >= TRIM_MEMORY_RUNNING_LOW) com.itzsuli.smartkeyboard.ai.LocalLlm.releaseAsync()
     }
 
     companion object {

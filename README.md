@@ -56,7 +56,7 @@ Type Arabic with Latin letters and numbers, the way people chat: `7abibi → ح�
 - Completions and next-word predictions from a trigram language model built from everyday spoken language (subtitles) and conversational sentences.
 - Personal model: every word you send teaches it your vocabulary, your phrases and your habits, and the more you type the more your own style wins. New words and slang are learned after you use them twice.
 - Picking a correction teaches it that typo; long-pressing a suggestion blocks it forever.
-- Emoji suggestions (`pizza` → 🍕, `liebe` → ❤️, `هههه` → 😂).
+- Emoji suggestions that replace the word when you tap them (`sob` → 😭, `pizza` → 🍕, `liebe` → ❤️, `hahaha`/`هههه` → 😂), for swiped words too. The emoji panel opens on your recently used emoji.
 
 ### Offline AI — on your phone
 - **No key, no internet, nothing leaves the phone.** Download one model once (Settings → AI assistant → Offline AI): **Gemma 4 E2B** (Google, best quality in English, German, Arabic and 140+ languages, 2 GB, fast on flagships such as the Galaxy S24), **Qwen 3 1.7B** (1 GB) or **Qwen 3 0.6B** (345 MB). Runs with Google's LiteRT-LM runtime on the GPU or CPU.

@@ -276,6 +276,7 @@ class Settings(context: Context) {
         const val TONE_APPS = "tone_apps"
         const val SEEN_APPS = "seen_apps"
         const val ONBOARDING_DONE = "onboarding_done"
+        const val EMOJI_RECENTS = "emoji_recents"
         const val SYNC_URI = "sync_uri"
         const val SYNC_SECRET = "sync_secret"
         const val SYNC_AUTO = "sync_auto"

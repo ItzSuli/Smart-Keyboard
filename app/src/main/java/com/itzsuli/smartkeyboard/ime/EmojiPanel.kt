@@ -17,12 +17,13 @@ import androidx.recyclerview.widget.RecyclerView
 import com.itzsuli.smartkeyboard.data.EmojiData
 import com.itzsuli.smartkeyboard.data.EmojiGroup
 
-/** Emoji picker with recents, categories and skin-tone variants (long press). */
+/** Emoji picker with recently used emoji, categories and skin-tone variants (long press). */
 @SuppressLint("ViewConstructor")
 class EmojiPanel(
     context: Context,
     private val data: EmojiData,
-    private val recents: MutableList<String>,
+    /** Shown first, newest first. */
+    private val recents: List<String>,
     private val onEmoji: (String) -> Unit,
     private val onBack: () -> Unit,
     private val onDelete: () -> Unit,
@@ -69,7 +70,7 @@ class EmojiPanel(
         items.clear(); sections.clear()
         if (recents.isNotEmpty()) {
             sections.add("🕘" to items.size)
-            items.add(Header("Recent"))
+            items.add(Header("Recently used"))
             items.addAll(recents)
         }
         for (g: EmojiGroup in data.groups) {
@@ -122,12 +123,7 @@ class EmojiPanel(
         highlightTab((grid.layoutManager as GridLayoutManager).findFirstVisibleItemPosition())
     }
 
-    private fun pick(emoji: String) {
-        recents.remove(emoji)
-        recents.add(0, emoji)
-        while (recents.size > 32) recents.removeAt(recents.size - 1)
-        onEmoji(emoji)
-    }
+    private fun pick(emoji: String) = onEmoji(emoji)
 
     private fun showVariants(anchor: View, base: String) {
         val options = listOf(base) + (variants[base] ?: return)

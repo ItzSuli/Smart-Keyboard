@@ -408,6 +408,46 @@ class KeyboardServiceTest {
         }
     }
 
+    @Test fun emojiSuggestionReplacesTheWord() {
+        val app = org.robolectric.RuntimeEnvironment.getApplication() as SmartKeyboardApp
+        type("so sad i could sob")
+        waitUntil { service.logic.shownSuggestions.any { it.kind == com.itzsuli.smartkeyboard.engine.Suggestion.Kind.EMOJI } }
+        val emoji = service.logic.shownSuggestions.first { it.kind == com.itzsuli.smartkeyboard.engine.Suggestion.Kind.EMOJI }
+        assertEquals("😭", emoji.text)
+        service.logic.onSuggestionPicked(emoji); sync()
+        assertEquals("So sad I could 😭 ", text)
+        // It's now the first of the recently used emoji.
+        assertEquals("😭", app.emojiRecents.used().first())
+        assertEquals("😭", app.emojiRecents.shown().first())
+    }
+
+    @Test fun swipedWordsGetEmojiToo() {
+        swipe("hello")
+        waitUntil { service.logic.shownSuggestions.any { it.kind == com.itzsuli.smartkeyboard.engine.Suggestion.Kind.EMOJI } }
+        val emoji = service.logic.shownSuggestions.first { it.kind == com.itzsuli.smartkeyboard.engine.Suggestion.Kind.EMOJI }
+        assertEquals("👋", emoji.text)
+        service.logic.onSuggestionPicked(emoji); sync()
+        assertEquals("👋 ", text)
+    }
+
+    @Test fun emojiForChatWordsAndLaughter() {
+        val data = com.itzsuli.smartkeyboard.data.EmojiData.get(activity)
+        assertEquals("😭", data.forWord("sob"))
+        assertEquals("😭", data.forWord("Sooob"))
+        assertEquals("❤️", data.forWord("loooove"))
+        for (w in listOf("hahahaha", "looool", "lmaooo", "xDD", "jajaja", "هههههه")) assertEquals(w, "😂", data.forWord(w))
+        assertEquals("🍕", data.forWord("pizza"))
+        assertEquals(null, data.forWord("the"))
+    }
+
+    @Test fun recentlyUsedEmojiComeFirst() {
+        val app = org.robolectric.RuntimeEnvironment.getApplication() as SmartKeyboardApp
+        // Before using any, popular ones fill the section.
+        assertEquals(com.itzsuli.smartkeyboard.data.EmojiRecents.STARTERS, app.emojiRecents.shown())
+        app.emojiRecents.add("🔥"); app.emojiRecents.add("🥳"); app.emojiRecents.add("🔥")
+        assertEquals(listOf("🔥", "🥳"), app.emojiRecents.shown())
+    }
+
     @Test fun learnsNewWordsAfterTwoUses() {
         // Whatever happens the first time, one undo is all it takes; after that the word is yours.
         type("ok skrrt ")

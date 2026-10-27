@@ -53,7 +53,10 @@ class OnDeviceProvider(private val context: Context, private val engine: String)
 /**
  * A downloaded model run by LiteRT-LM (Google's on-device LLM runtime): GPU first where the
  * model is built for it, the CPU otherwise. The model stays loaded while it's being used and is
- * let go after a few idle minutes, so it doesn't hold on to memory.
+ * let go after a while without use, so it doesn't hold on to memory.
+ *
+ * Loading takes seconds, so nothing the keyboard calls on its main thread ([warmUpAsync],
+ * [isLoaded], [releaseAsync]) ever waits for it: typing must never stall behind the AI.
  */
 object LocalLlm {
     /** One loaded model. Replaced in tests, where native code can't run. */
@@ -64,8 +67,13 @@ object LocalLlm {
     var factory: (Context, OfflineModel) -> Runner = { ctx, model -> LiteRtRunner(ctx, model) }
 
     private var runner: Runner? = null
-    private var loaded: OfflineModel? = null
+    @Volatile private var loaded: OfflineModel? = null
+    @Volatile private var loading = false
     private val janitor = Executors.newSingleThreadScheduledExecutor { r -> Thread(r, "local-llm-release").apply { isDaemon = true } }
+    /** Loads models at low priority so the keyboard's drawing and typing come first. */
+    private val loader = Executors.newSingleThreadExecutor { r ->
+        Thread({ android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_BACKGROUND); r.run() }, "local-llm-load").apply { isDaemon = true }
+    }
     private var release: ScheduledFuture<*>? = null
 
     @Synchronized
@@ -75,12 +83,25 @@ object LocalLlm {
         return stripThinking(r.generate(system, user, maxTokens))
     }
 
-    /** Loads the model ahead of the first request (call off the main thread). */
+    /** Loads the model ahead of the first request (blocks until it's loaded). */
     @Synchronized
     fun warmUp(context: Context, model: OfflineModel) {
         if (!OfflineModelStore(context).isInstalled(model)) return
         runCatching { load(context, model) }
         scheduleRelease()
+    }
+
+    /** Starts loading the model in the background and returns at once. */
+    fun warmUpAsync(context: Context, model: OfflineModel) {
+        if (loaded == model || loading) return
+        loading = true
+        loader.execute {
+            try {
+                warmUp(context, model)
+            } finally {
+                loading = false
+            }
+        }
     }
 
     private fun load(context: Context, model: OfflineModel): Runner {
@@ -99,7 +120,11 @@ object LocalLlm {
         loaded = null
     }
 
-    val isLoaded: Boolean @Synchronized get() = runner != null
+    /** Never waits, even while a model is loading. */
+    val isLoaded: Boolean get() = loaded != null
+
+    /** Lets the model go without waiting for a request or a load that's running. */
+    fun releaseAsync() { janitor.execute { release() } }
 
     private fun scheduleRelease() {
         release?.cancel(false)
@@ -110,7 +135,8 @@ object LocalLlm {
     fun stripThinking(text: String): String =
         text.replace(Regex("(?s)<think>.*?</think>"), "").replace(Regex("(?s)^.*</think>"), "").trim()
 
-    private const val IDLE_MINUTES = 5L
+    /** Kept loaded this long after its last use: reloading costs seconds every time. */
+    private const val IDLE_MINUTES = 20L
 }
 
 private class LiteRtRunner(context: Context, private val model: OfflineModel) : LocalLlm.Runner {
