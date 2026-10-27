@@ -135,7 +135,11 @@ open class SmartKeyboardService : InputMethodService(), KeyboardView.Listener, S
         theme = KeyboardTheme.resolve(this, settings)
         backgroundBitmap = if (settings.backgroundImage) loadBackground() else null
         keyboardView?.let { it.theme = theme; it.settings = settings; it.backgroundBitmap = backgroundBitmap }
-        overlay?.theme = theme
+        overlay?.let { o ->
+            o.theme = theme
+            o.trailStyle = settings.trailStyle
+            o.trailWidthDp = settings.trailWidthDp.toFloat()
+        }
         strip?.theme = theme
         strip?.setBackgroundColor(if (backgroundBitmap != null) darken(theme.background) else theme.background)
         column?.setBackgroundColor(theme.background)

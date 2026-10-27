@@ -8,6 +8,7 @@ import android.graphics.Paint
 import android.graphics.RectF
 import android.os.SystemClock
 import android.view.View
+import com.itzsuli.smartkeyboard.data.TrailStyle
 import kotlin.math.max
 import kotlin.math.min
 
@@ -21,6 +22,9 @@ class KeyboardOverlay(context: Context) : View(context) {
 
     var theme: KeyboardTheme = KeyboardTheme.DARK
         set(value) { field = value; invalidate() }
+    var trailStyle: TrailStyle = TrailStyle.ACCENT
+    var trailWidthDp: Float = 6f
+    private val hsv = FloatArray(3)
 
     private val density = resources.displayMetrics.density
     private val fill = Paint(Paint.ANTI_ALIAS_FLAG)
@@ -168,9 +172,10 @@ class KeyboardOverlay(context: Context) : View(context) {
         while (first < tCount - 1 && now - tt[(tStart + first) % MAX_TRAIL] > TRAIL_LIFE_MS) first++
         val visible = tCount - first
         if (visible < 2) { if (trailReleasedAt > 0) postInvalidateOnAnimation(); return }
-        val color = theme.accent
-        val maxW = 6f * density
-        val chunk = maxOf(4, visible / TRAIL_CHUNKS)
+        val color = if (trailStyle == TrailStyle.MONO) theme.keyText else theme.accent
+        val maxW = trailWidthDp * density
+        // Rainbow needs finer pieces so the colours flow instead of stepping.
+        val chunk = maxOf(if (trailStyle == TrailStyle.RAINBOW) 2 else 4, visible / if (trailStyle == TrailStyle.RAINBOW) TRAIL_CHUNKS * 3 else TRAIL_CHUNKS)
         var i = first
         while (i < tCount - 1) {
             val end = minOf(tCount - 1, i + chunk)
@@ -193,7 +198,13 @@ class KeyboardOverlay(context: Context) : View(context) {
                 }
                 trailPath.lineTo(px, py)
                 trailPaint.strokeCap = if (head) Paint.Cap.ROUND else Paint.Cap.BUTT
-                trailPaint.color = Color.argb(alpha, Color.red(color), Color.green(color), Color.blue(color))
+                trailPaint.color = if (trailStyle == TrailStyle.RAINBOW) {
+                    // Hue runs along the trail and slowly drifts while swiping.
+                    hsv[0] = (pos * 300f + (now / 8L % 360L)) % 360f
+                    hsv[1] = 0.75f
+                    hsv[2] = if (theme.isDark) 1f else 0.9f
+                    Color.HSVToColor(alpha, hsv)
+                } else Color.argb(alpha, Color.red(color), Color.green(color), Color.blue(color))
                 trailPaint.strokeWidth = maxW * (0.3f + 0.7f * pos)
                 canvas.drawPath(trailPath, trailPaint)
             }

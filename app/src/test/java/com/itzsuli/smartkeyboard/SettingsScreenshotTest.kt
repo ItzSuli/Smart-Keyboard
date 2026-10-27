@@ -28,12 +28,16 @@ class SettingsScreenshotTest {
             val controller = Robolectric.buildActivity(MainActivity::class.java, intent).setup()
             repeat(10) { shadowOf(Looper.getMainLooper()).idle(); Thread.sleep(30) }
             val root: View = controller.get().window.decorView
-            root.measure(View.MeasureSpec.makeMeasureSpec(1233, View.MeasureSpec.EXACTLY), View.MeasureSpec.makeMeasureSpec(2673, View.MeasureSpec.EXACTLY))
-            root.layout(0, 0, 1233, 2673)
-            repeat(5) { shadowOf(Looper.getMainLooper()).idle(); Thread.sleep(30) }
-            val bmp = Bitmap.createBitmap(1233, 2673, Bitmap.Config.ARGB_8888)
-            root.draw(Canvas(bmp))
-            File(out, "settings_$section.png").outputStream().use { bmp.compress(Bitmap.CompressFormat.PNG, 100, it) }
+            // Phone-sized for the docs, plus a very tall one that shows every option at once.
+            for ((suffix, height) in listOf("" to 2673, "_full" to 9000)) {
+                if (suffix.isNotEmpty() && section !in setOf("appearance", "typing")) continue
+                root.measure(View.MeasureSpec.makeMeasureSpec(1233, View.MeasureSpec.EXACTLY), View.MeasureSpec.makeMeasureSpec(height, View.MeasureSpec.EXACTLY))
+                root.layout(0, 0, 1233, height)
+                repeat(5) { shadowOf(Looper.getMainLooper()).idle(); Thread.sleep(30) }
+                val bmp = Bitmap.createBitmap(1233, height, Bitmap.Config.ARGB_8888)
+                root.draw(Canvas(bmp))
+                File(out, "settings_$section$suffix.png").outputStream().use { bmp.compress(Bitmap.CompressFormat.PNG, 100, it) }
+            }
             controller.pause().stop().destroy()
         }
     }

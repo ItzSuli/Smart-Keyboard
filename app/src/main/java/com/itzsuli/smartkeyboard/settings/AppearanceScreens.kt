@@ -36,6 +36,9 @@ import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -45,6 +48,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.itzsuli.smartkeyboard.data.Languages
 import com.itzsuli.smartkeyboard.data.HapticStyle
+import com.itzsuli.smartkeyboard.data.KeyFont
+import com.itzsuli.smartkeyboard.data.TrailStyle
 import com.itzsuli.smartkeyboard.data.Settings
 import com.itzsuli.smartkeyboard.engine.AutoCorrectMode
 import com.itzsuli.smartkeyboard.ime.KeyboardTheme
@@ -52,7 +57,9 @@ import com.itzsuli.smartkeyboard.ime.SmartKeyboardService
 import java.io.File
 
 private val ACCENTS = listOf(
-    0, 0xFF3B6FE0, 0xFF5B4BE0, 0xFF9333EA, 0xFFDB2777, 0xFFE5484D, 0xFFF97316, 0xFFF5B800, 0xFF22C55E, 0xFF14B8A6, 0xFF06B6D4, 0xFF64748B,
+    0, 0xFF3B6FE0, 0xFF2563EB, 0xFF5B4BE0, 0xFF7C3AED, 0xFF9333EA, 0xFFDB2777, 0xFFFF5C8A, 0xFFE5484D, 0xFFF97316, 0xFFFF6B00,
+    0xFFF5B800, 0xFFFCEE0A, 0xFF84CC16, 0xFF22C55E, 0xFF10B981, 0xFF14B8A6, 0xFF06B6D4, 0xFF5EEAD4, 0xFFB76E79, 0xFF8B5E3C,
+    0xFF64748B, 0xFFFFFFFF, 0xFF000000,
 ).map { it.toInt() }
 
 @Composable
@@ -64,7 +71,16 @@ fun AppearanceScreen(onBack: () -> Unit) {
     val radius by setting(Settings.KEY_RADIUS) { it.keyRadiusDp }
     val borders by setting(Settings.KEY_BORDERS) { it.keyBorders }
     val hasImage by setting(Settings.BG_IMAGE) { it.backgroundImage }
+    val font by setting(Settings.KEY_FONT) { it.keyFont }
+    val trail by setting(Settings.TRAIL_STYLE) { it.trailStyle }
+    // Re-read the preview whenever any of the custom colours or the shadow switch change.
+    val customBg by setting(Settings.CUSTOM_BG) { it.customBackground }
+    val customBg2 by setting(Settings.CUSTOM_BG2) { it.customBackground2 }
+    val customKey by setting(Settings.CUSTOM_KEY) { it.customKey }
+    val customText by setting(Settings.CUSTOM_TEXT) { it.customText }
+    val shadows by setting(Settings.KEY_SHADOWS) { it.keyShadows }
     val dark = KeyboardTheme.systemIsDark(context)
+    var accentPicker by remember { mutableStateOf(false) }
 
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri: Uri? ->
         if (uri != null && saveBackground(context, uri)) {
@@ -76,18 +92,19 @@ fun AppearanceScreen(onBack: () -> Unit) {
 
     SettingsPage("Appearance", onBack) {
         item {
-            val current = KeyboardTheme.resolve(context, s).let { if (accent != 0) it.withAccent(accent) else it }
+            val current = remember(themeId, accent, customBg, customBg2, customKey, customText, shadows) { KeyboardTheme.resolve(context, s) }
             KeyboardPreview(current, Modifier.fillMaxWidth().aspectRatio(2.2f).clip(RoundedCornerShape(22.dp)), radius.toFloat(), borders)
         }
         item {
             Group("Theme") {
-                val options = listOf("auto" to "Auto", "dynamic" to "Material You") + KeyboardTheme.PRESETS.map { it.id to it.name }
+                val options = listOf("auto" to "Auto", "dynamic" to "Material You", "custom" to "Your colours") + KeyboardTheme.PRESETS.map { it.id to it.name }
                 options.chunked(3).forEach { row ->
                     Row(Modifier.padding(horizontal = 12.dp, vertical = 6.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                         row.forEach { (id, name) ->
                             val t = when (id) {
                                 "auto" -> if (dark) KeyboardTheme.DARK else KeyboardTheme.LIGHT
                                 "dynamic" -> KeyboardTheme.dynamic(context, dark)
+                                "custom" -> KeyboardTheme.custom(s)
                                 else -> KeyboardTheme.PRESETS.first { it.id == id }
                             }
                             val selected = id == themeId
@@ -104,6 +121,15 @@ fun AppearanceScreen(onBack: () -> Unit) {
                 Spacer(Modifier.height(6.dp))
             }
         }
+        if (themeId == "custom") item {
+            Group("Your colours") {
+                ColorSetting("Background", null, customBg) { s.set(Settings.CUSTOM_BG, it) }
+                ColorSetting("Background gradient", "Optional second colour, blended from top-left to bottom-right", customBg2, allowNone = true) { s.set(Settings.CUSTOM_BG2, it) }
+                ColorSetting("Keys", null, customKey) { s.set(Settings.CUSTOM_KEY, it) }
+                ColorSetting("Letters", null, customText) { s.set(Settings.CUSTOM_TEXT, it) }
+                Hint("Pressed keys, function keys and hints are mixed from these so everything matches. The accent colour below colours the enter key and highlights.")
+            }
+        }
         item {
             Group("Accent colour") {
                 Row(Modifier.horizontalScroll(rememberScrollState()).padding(12.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -117,11 +143,19 @@ fun AppearanceScreen(onBack: () -> Unit) {
                             contentAlignment = Alignment.Center,
                         ) {
                             if (c == 0) Text("A", fontWeight = FontWeight.Bold)
-                            else if (selected) Icon(Icons.Rounded.Check, null, tint = Color.White)
+                            else if (selected) Icon(Icons.Rounded.Check, null, tint = if (KeyboardTheme.isLight(c)) Color.Black else Color.White)
                         }
                     }
+                    Box(
+                        Modifier.size(40.dp).clip(CircleShape)
+                            .background(androidx.compose.ui.graphics.Brush.sweepGradient((0..6).map { Color(android.graphics.Color.HSVToColor(floatArrayOf(it * 60f, 0.8f, 1f))) }))
+                            .border(if (accent != 0 && accent !in ACCENTS) 3.dp else 0.dp, MaterialTheme.colorScheme.onSurface, CircleShape)
+                            .clickable { accentPicker = true },
+                        contentAlignment = Alignment.Center,
+                    ) { Text("+", fontWeight = FontWeight.Bold, color = Color.White) }
                 }
-                Hint("“A” uses the theme's own colour.")
+                Hint("“A” uses the theme's own colour, “+” picks any colour.")
+                if (accentPicker) ColorPickerDialog("Accent colour", accent, onDismiss = { accentPicker = false }) { accentPicker = false; s.set(Settings.ACCENT, it) }
             }
         }
         item {
@@ -131,11 +165,52 @@ fun AppearanceScreen(onBack: () -> Unit) {
                 SliderSetting(Settings.KEY_GAP, "Space between keys", 2..12, format = { "$it dp" }) { it.keyGapDp }
                 SliderSetting(Settings.KEY_HEIGHT, "Keyboard height", 70..140, step = 5, format = { "$it%" }) { it.keyHeightPercent }
                 SliderSetting(Settings.LABEL_SCALE, "Letter size", 80..130, step = 5, format = { "$it%" }) { it.labelScalePercent }
+                SwitchSetting(Settings.KEY_SHADOWS, "Key shadows", "A soft shadow under each key") { it.keyShadows }
+                Divider()
+                Text("Font", style = MaterialTheme.typography.bodyLarge, modifier = Modifier.padding(start = 16.dp, top = 10.dp))
+                androidx.compose.foundation.layout.FlowRow(
+                    Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    KeyFont.entries.forEach { f ->
+                        androidx.compose.material3.FilterChip(
+                            selected = f == font,
+                            onClick = { s.set(Settings.KEY_FONT, f) },
+                            label = {
+                                Text(
+                                    "Aa · ${f.label}",
+                                    fontFamily = when (f) {
+                                        KeyFont.SERIF -> androidx.compose.ui.text.font.FontFamily.Serif
+                                        KeyFont.MONO -> androidx.compose.ui.text.font.FontFamily.Monospace
+                                        else -> androidx.compose.ui.text.font.FontFamily.SansSerif
+                                    },
+                                    fontWeight = when (f) {
+                                        KeyFont.LIGHT -> FontWeight.Light
+                                        KeyFont.MEDIUM -> FontWeight.Medium
+                                        KeyFont.BOLD -> FontWeight.Bold
+                                        else -> FontWeight.Normal
+                                    },
+                                )
+                            },
+                        )
+                    }
+                }
+                SwitchSetting(Settings.CAPITAL_LABELS, "Capital letters on keys", "Like the iPhone; what you type still follows shift") { it.capitalLabels }
+                SwitchSetting(Settings.SPACE_LABEL, "Language name on space bar") { it.spaceLabel }
                 Divider()
                 SwitchSetting(Settings.NUMBER_ROW, "Number row") { it.numberRow }
                 SwitchSetting(Settings.SHOW_HINTS, "Number hints on top row", "Long-press for numbers either way") { it.showHints }
                 SwitchSetting(Settings.KEY_POPUP, "Pop-up on key press") { it.keyPopup }
                 SwitchSetting(Settings.EMOJI_KEY, "Emoji key") { it.emojiKey }
+            }
+        }
+        item {
+            Group("Swipe trail") {
+                ChoiceSetting(
+                    "Colour", null,
+                    listOf(TrailStyle.ACCENT to "Accent", TrailStyle.RAINBOW to "Rainbow", TrailStyle.MONO to "Letters"), trail,
+                ) { s.set(Settings.TRAIL_STYLE, it) }
+                SliderSetting(Settings.TRAIL_WIDTH, "Thickness", 2..14, format = { "$it dp" }) { it.trailWidthDp }
             }
         }
         item {

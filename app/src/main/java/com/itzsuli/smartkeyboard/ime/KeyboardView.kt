@@ -16,6 +16,7 @@ import android.os.Looper
 import android.os.SystemClock
 import android.view.MotionEvent
 import android.view.View
+import com.itzsuli.smartkeyboard.data.KeyFont
 import com.itzsuli.smartkeyboard.data.Settings
 import kotlin.math.abs
 import kotlin.math.hypot
@@ -87,6 +88,18 @@ class KeyboardView(context: Context, private val overlay: KeyboardOverlay) : Vie
     private val iconPaint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val bgPaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
     private var gradientShader: Shader? = null
+    private var fontKey: KeyFont? = null
+    private var letterFace: Typeface = Typeface.DEFAULT
+    private var functionFace: Typeface = Typeface.DEFAULT_BOLD
+
+    private fun updateFonts() {
+        val f = settings?.keyFont ?: KeyFont.DEFAULT
+        if (f == fontKey) return
+        fontKey = f
+        val family = Typeface.create(f.family, Typeface.NORMAL)
+        letterFace = if (f.bold) Typeface.create(family, Typeface.BOLD) else family
+        functionFace = Typeface.create(family, Typeface.BOLD)
+    }
     private val drawRect = RectF()
     private val pressedKeys = HashSet<Key>()
 
@@ -189,6 +202,7 @@ class KeyboardView(context: Context, private val overlay: KeyboardOverlay) : Vie
     }
 
     private fun drawLabel(canvas: Canvas, key: Key, r: RectF, scale: Float) {
+        updateFonts()
         val textColor = when (key.type) {
             Key.Type.ACTION -> theme.actionText
             Key.Type.FUNCTION -> theme.functionText
@@ -218,8 +232,9 @@ class KeyboardView(context: Context, private val overlay: KeyboardOverlay) : Vie
                 }
             }
             KeyCode.SPACE -> {
+                if (settings?.spaceLabel == false) return
                 labelPaint.color = theme.hintText
-                labelPaint.typeface = Typeface.DEFAULT
+                labelPaint.typeface = letterFace
                 labelPaint.textSize = r.height() * 0.3f * scale
                 val label = languageLabel.ifEmpty { key.label }
                 // Mixed languages make long labels ("Português · Nederlands"): shrink to fit.
@@ -231,7 +246,7 @@ class KeyboardView(context: Context, private val overlay: KeyboardOverlay) : Vie
         val label = displayLabel(key)
         labelPaint.color = textColor
         val isLetterLike = key.code == KeyCode.TEXT && label.length <= 2
-        labelPaint.typeface = if (isLetterLike) Typeface.DEFAULT else Typeface.DEFAULT_BOLD
+        labelPaint.typeface = if (isLetterLike) letterFace else functionFace
         labelPaint.textSize = r.height() * (if (isLetterLike) 0.44f else 0.3f) * scale
         val maxWidth = r.width() * 0.86f
         while (labelPaint.measureText(label) > maxWidth && labelPaint.textSize > 8 * density) labelPaint.textSize *= 0.9f
@@ -244,8 +259,14 @@ class KeyboardView(context: Context, private val overlay: KeyboardOverlay) : Vie
         }
     }
 
-    fun displayLabel(key: Key): String {
+    /** What a tap types (follows shift), shown in the key preview. */
+    private fun typedLabel(key: Key): String {
         if (key.code != KeyCode.TEXT || !key.isLetter || shiftState == ShiftState.OFF) return key.label
+        return com.itzsuli.smartkeyboard.engine.TextUtils.uppercase(key.label, layout?.lang ?: "en")
+    }
+
+    fun displayLabel(key: Key): String {
+        if (key.code != KeyCode.TEXT || !key.isLetter || (shiftState == ShiftState.OFF && settings?.capitalLabels != true)) return key.label
         val lang = layout?.lang ?: "en"
         return com.itzsuli.smartkeyboard.engine.TextUtils.uppercase(key.label, lang)
     }
@@ -322,7 +343,7 @@ class KeyboardView(context: Context, private val overlay: KeyboardOverlay) : Vie
         pressedKeys.add(key)
         listener?.onFeedback(key, Haptics.Kind.PRESS)
         if (settings?.keyPopup != false && key.type == Key.Type.CHAR && key.code == KeyCode.TEXT) {
-            overlay.showPreview(displayLabel(key), toOverlay(key.bounds))
+            overlay.showPreview(typedLabel(key), toOverlay(key.bounds))
         }
         val delay = (settings?.longPressMs ?: 300).toLong()
         val lp = Runnable { onLongPress(p) }
@@ -400,7 +421,7 @@ class KeyboardView(context: Context, private val overlay: KeyboardOverlay) : Vie
                             pointers[p.id] = Pointer(p.id, other, x, y)
                             cancelLongPress(p)
                             pressedKeys.remove(key); pressedKeys.add(other)
-                            overlay.showPreview(displayLabel(other), toOverlay(other.bounds))
+                            overlay.showPreview(typedLabel(other), toOverlay(other.bounds))
                             invalidate()
                         }
                     }

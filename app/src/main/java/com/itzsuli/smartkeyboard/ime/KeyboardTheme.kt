@@ -92,7 +92,106 @@ data class KeyboardTheme(
             keyShadow = c("#22FF6F91"), isDark = false,
         )
 
-        val PRESETS = listOf(LIGHT, DARK, AMOLED, OCEAN, SUNSET, FOREST, NEON, PASTEL, MOCHA, GLASS, SAKURA)
+        val MIDNIGHT = KeyboardTheme(
+            "midnight", "Midnight", c("#0F172A"), c("#1E1B4B"), c("#1E293B"), c("#334155"), c("#172033"), c("#818CF8"),
+            c("#E2E8F0"), c("#CBD5E1"), c("#0F172A"), c("#64748B"), c("#818CF8"), c("#E2E8F0"),
+            keyShadow = c("#66000000"), isDark = true,
+        )
+        val NORD = KeyboardTheme(
+            "nord", "Nord", c("#2E3440"), null, c("#3B4252"), c("#4C566A"), c("#353C4A"), c("#88C0D0"),
+            c("#ECEFF4"), c("#D8DEE9"), c("#2E3440"), c("#81A1C1"), c("#88C0D0"), c("#ECEFF4"),
+            keyShadow = c("#44000000"), isDark = true,
+        )
+        val DRACULA = KeyboardTheme(
+            "dracula", "Dracula", c("#282A36"), null, c("#44475A"), c("#6272A4"), c("#343746"), c("#BD93F9"),
+            c("#F8F8F2"), c("#F8F8F2"), c("#282A36"), c("#8B93C4"), c("#FF79C6"), c("#F8F8F2"),
+            keyShadow = c("#55000000"), isDark = true,
+        )
+        val SOLARIZED = KeyboardTheme(
+            "solarized", "Solarized", c("#EEE8D5"), null, c("#FDF6E3"), c("#E4DCC4"), c("#E0D9C3"), c("#268BD2"),
+            c("#586E75"), c("#657B83"), Color.WHITE, c("#93A1A1"), c("#268BD2"), c("#586E75"),
+            keyShadow = c("#22000000"), isDark = false,
+        )
+        val MINT = KeyboardTheme(
+            "mint", "Mint", c("#E3F6EF"), c("#F2FBF7"), c("#FFFFFF"), c("#CDEDE1"), c("#D3EFE4"), c("#10B981"),
+            c("#134E4A"), c("#115E59"), Color.WHITE, c("#6BA595"), c("#10B981"), c("#134E4A"),
+            keyShadow = c("#2210B981"), isDark = false,
+        )
+        val LAVENDER = KeyboardTheme(
+            "lavender", "Lavender", c("#EDE9FE"), c("#F5F3FF"), c("#FFFFFF"), c("#DDD6FE"), c("#E4DEFC"), c("#7C3AED"),
+            c("#3B0764"), c("#4C1D95"), Color.WHITE, c("#A78BFA"), c("#7C3AED"), c("#3B0764"),
+            keyShadow = c("#227C3AED"), isDark = false,
+        )
+        val AURORA = KeyboardTheme(
+            "aurora", "Aurora", c("#0B3D3A"), c("#3B1E5A"), c("#2AFFFFFF"), c("#50FFFFFF"), c("#1AFFFFFF"), c("#5EEAD4"),
+            Color.WHITE, c("#E6FFFFFF"), c("#0B3D3A"), c("#A0FFFFFF"), c("#5EEAD4"), Color.WHITE,
+            keyBorder = c("#22FFFFFF"), isDark = true,
+        )
+        val ROSE_GOLD = KeyboardTheme(
+            "rose_gold", "Rose Gold", c("#F4E1DA"), c("#EBC8BD"), c("#FFF8F5"), c("#F1D3C8"), c("#EBCFC4"), c("#B76E79"),
+            c("#5A3A3A"), c("#6E4545"), Color.WHITE, c("#B08A80"), c("#B76E79"), c("#5A3A3A"),
+            keyShadow = c("#22B76E79"), isDark = false,
+        )
+        val CYBERPUNK = KeyboardTheme(
+            "cyberpunk", "Cyberpunk", c("#0D0D0D"), c("#1A1A05"), c("#1A1A1A"), c("#333300"), c("#121212"), c("#FCEE0A"),
+            c("#FCEE0A"), c("#00F0FF"), c("#0D0D0D"), c("#8A8A3A"), c("#FCEE0A"), c("#FCEE0A"),
+            keyBorder = c("#55FCEE0A"), isDark = true,
+        )
+        val PAPER = KeyboardTheme(
+            "paper", "Paper", c("#F5F1E8"), null, c("#FFFDF8"), c("#E9E2D3"), c("#E8E1D2"), c("#2F2F2F"),
+            c("#2B2B2B"), c("#3A3A3A"), c("#F5F1E8"), c("#9C958A"), c("#D97706"), c("#2B2B2B"),
+            keyShadow = c("#22000000"), isDark = false,
+        )
+        val SLATE = KeyboardTheme(
+            "slate", "Slate", c("#334155"), null, c("#475569"), c("#64748B"), c("#3B4A5F"), c("#38BDF8"),
+            c("#F1F5F9"), c("#E2E8F0"), c("#0C2233"), c("#94A3B8"), c("#38BDF8"), c("#F1F5F9"),
+            keyShadow = c("#44000000"), isDark = true,
+        )
+        val BERRY = KeyboardTheme(
+            "berry", "Berry", c("#4A0E2E"), c("#2D0A3E"), c("#6B1D45"), c("#8C2B5C"), c("#5A1538"), c("#FF5C8A"),
+            c("#FFE4EE"), c("#FFD1E1"), c("#3A0A22"), c("#D58BA8"), c("#FF5C8A"), c("#FFE4EE"),
+            keyBorder = c("#33FF5C8A"), isDark = true,
+        )
+        val CARBON = KeyboardTheme(
+            "carbon", "Carbon", c("#121212"), null, c("#1F1F1F"), c("#333333"), c("#181818"), c("#FF6B00"),
+            c("#EDEDED"), c("#CFCFCF"), c("#121212"), c("#777777"), c("#FF6B00"), c("#EDEDED"),
+            keyShadow = c("#88000000"), isDark = true,
+        )
+        val SKY = KeyboardTheme(
+            "sky", "Sky", c("#DBEAFE"), c("#EFF6FF"), c("#FFFFFF"), c("#BFDBFE"), c("#C7DCF7"), c("#2563EB"),
+            c("#1E3A8A"), c("#1E40AF"), Color.WHITE, c("#7DA3D9"), c("#2563EB"), c("#1E3A8A"),
+            keyShadow = c("#222563EB"), isDark = false,
+        )
+
+        val PRESETS = listOf(
+            LIGHT, DARK, AMOLED, OCEAN, SUNSET, FOREST, NEON, PASTEL, MOCHA, GLASS, SAKURA,
+            MIDNIGHT, NORD, DRACULA, SOLARIZED, MINT, LAVENDER, AURORA, ROSE_GOLD, CYBERPUNK, PAPER, SLATE, BERRY, CARBON, SKY,
+        )
+
+        /** Blends [a] towards [b] by [t] (0..1). */
+        fun mix(@ColorInt a: Int, @ColorInt b: Int, t: Float): Int = Color.argb(
+            (Color.alpha(a) + (Color.alpha(b) - Color.alpha(a)) * t).toInt(),
+            (Color.red(a) + (Color.red(b) - Color.red(a)) * t).toInt(),
+            (Color.green(a) + (Color.green(b) - Color.green(a)) * t).toInt(),
+            (Color.blue(a) + (Color.blue(b) - Color.blue(a)) * t).toInt(),
+        )
+
+        /**
+         * The user's own theme from four colours (background, optional second background for
+         * a gradient, keys, letters); everything else is derived so it always looks coherent.
+         */
+        fun custom(settings: Settings): KeyboardTheme {
+            val bg = settings.customBackground or 0xFF000000.toInt()
+            val key = settings.customKey
+            val text = settings.customText or 0xFF000000.toInt()
+            val dark = !isLight(bg)
+            val accent = if (isLight(bg)) c("#3B6FE0") else c("#7FA7FF")
+            return KeyboardTheme(
+                "custom", "Custom", bg, settings.customBackground2.takeIf { it != 0 }, key, mix(key, text, 0.22f), mix(key, bg, 0.55f),
+                accent, text, text, if (isLight(accent)) Color.BLACK else Color.WHITE, mix(text, bg, 0.45f), accent, text,
+                keyShadow = if (dark) c("#55000000") else c("#22000000"), isDark = dark,
+            )
+        }
 
         /** Material You: built from the wallpaper palette on Android 12+. */
         fun dynamic(context: Context, dark: Boolean): KeyboardTheme {
@@ -120,11 +219,13 @@ data class KeyboardTheme(
         /** Resolves the theme chosen in settings (including "auto" and custom accent colours). */
         fun resolve(context: Context, settings: Settings): KeyboardTheme {
             val dark = systemIsDark(context)
-            val base = when (val id = settings.themeId) {
+            var base = when (val id = settings.themeId) {
                 "auto" -> if (dark) DARK else LIGHT
                 "dynamic" -> dynamic(context, dark)
+                "custom" -> custom(settings)
                 else -> PRESETS.firstOrNull { it.id == id } ?: if (dark) DARK else LIGHT
             }
+            if (!settings.keyShadows) base = base.copy(keyShadow = Color.TRANSPARENT)
             val accent = settings.customAccent
             return if (accent != 0) base.withAccent(accent) else base
         }

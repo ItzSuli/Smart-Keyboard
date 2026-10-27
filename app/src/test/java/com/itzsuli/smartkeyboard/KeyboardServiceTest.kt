@@ -464,11 +464,32 @@ class KeyboardServiceTest {
         service.onAiClose()
         repeat(3) { idle() }
         val s = (org.robolectric.RuntimeEnvironment.getApplication() as SmartKeyboardApp).settings
-        for (t in listOf("dark", "sunset", "neon", "glass")) {
+        for (t in listOf("dark", "sunset", "neon", "glass", "midnight", "aurora", "cyberpunk", "rose_gold", "mint")) {
             s.set(Settings.THEME, t)
             idle()
             shot("theme_$t")
         }
+        // Your own colours, a rounded serif look, capital letters and a rainbow trail.
+        s.set(Settings.CUSTOM_BG, 0xFF2D0A3E.toInt()); s.set(Settings.CUSTOM_BG2, 0xFF0B2545.toInt())
+        s.set(Settings.CUSTOM_KEY, 0x33FFFFFF); s.set(Settings.CUSTOM_TEXT, 0xFFFFE4EE.toInt())
+        s.set(Settings.ACCENT, 0xFFFF5C8A.toInt()); s.set(Settings.KEY_FONT, com.itzsuli.smartkeyboard.data.KeyFont.SERIF)
+        s.set(Settings.CAPITAL_LABELS, true); s.set(Settings.TRAIL_STYLE, com.itzsuli.smartkeyboard.data.TrailStyle.RAINBOW)
+        s.set(Settings.TRAIL_WIDTH, 9); s.set(Settings.THEME, "custom")
+        idle()
+        overlay.trailStart()
+        px = Float.NaN; py = Float.NaN
+        for (c in "rainbow") {
+            val k = key(c.toString())
+            val x = k.bounds.centerX() + loc[0] - oLoc[0]
+            val y = k.bounds.centerY() + loc[1] - oLoc[1]
+            if (!px.isNaN()) for (i in 1..16) overlay.trailAdd(px + (x - px) * i / 16f, py + (y - py) * i / 16f) else overlay.trailAdd(x, y)
+            px = x; py = y
+        }
+        shot("theme_custom")
+        overlay.trailEnd()
+        Thread.sleep(400)
+        for (k in listOf(Settings.ACCENT, Settings.KEY_FONT, Settings.CAPITAL_LABELS, Settings.TRAIL_STYLE, Settings.TRAIL_WIDTH)) s.set(k, null)
+        s.set(Settings.THEME, "glass"); idle()
         s.set(Settings.CURRENT_LANGUAGE, "de"); idle(); waitUntil { service.logic.isReady }; shot("german")
         s.set(Settings.CURRENT_LANGUAGE, "ar"); idle(); waitUntil { service.logic.isReady }; shot("arabic")
         tap(keyboard.layout!!.keys.first { it.code == KeyCode.SYMBOLS }); shot("symbols")

@@ -10,6 +10,20 @@ enum class AiAutoProof { OFF, SUGGEST, AUTO }
 /** How key presses feel. CRISP and SOFT use the phone's tuned haptic effects where available. */
 enum class HapticStyle { CRISP, SOFT, CLASSIC, SYSTEM }
 
+/** Typeface of the key labels (system font families, available on every phone). */
+enum class KeyFont(val label: String, val family: String, val bold: Boolean = false) {
+    DEFAULT("Default", "sans-serif"),
+    LIGHT("Light", "sans-serif-light"),
+    MEDIUM("Medium", "sans-serif-medium"),
+    BOLD("Bold", "sans-serif", bold = true),
+    CONDENSED("Condensed", "sans-serif-condensed"),
+    SERIF("Serif", "serif"),
+    MONO("Mono", "monospace"),
+}
+
+/** Colour of the swipe trail. */
+enum class TrailStyle { ACCENT, RAINBOW, MONO }
+
 /**
  * All user preferences. Backed by one SharedPreferences file that the keyboard and the
  * settings app share (same process), so changes apply instantly.
@@ -52,6 +66,20 @@ class Settings(context: Context) {
     val keyPopup get() = bool(KEY_POPUP, true)
     val backgroundImage get() = bool(BG_IMAGE, false)
     val backgroundDim get() = int(BG_DIM, 35)
+    val keyFont get() = enumValueOrDefault(str(KEY_FONT, KeyFont.DEFAULT.name), KeyFont.DEFAULT)
+    val keyShadows get() = bool(KEY_SHADOWS, true)
+    /** Letters drawn as capitals (like the iPhone) instead of following shift. */
+    val capitalLabels get() = bool(CAPITAL_LABELS, false)
+    val spaceLabel get() = bool(SPACE_LABEL, true)
+    val trailStyle get() = enumValueOrDefault(str(TRAIL_STYLE, TrailStyle.ACCENT.name), TrailStyle.ACCENT)
+    val trailWidthDp get() = int(TRAIL_WIDTH, 6)
+
+    // ---- custom theme (THEME = "custom") ----
+    val customBackground get() = int(CUSTOM_BG, 0xFF1B1C20.toInt())
+    /** Second background colour for a gradient; 0 = plain. */
+    val customBackground2 get() = int(CUSTOM_BG2, 0)
+    val customKey get() = int(CUSTOM_KEY, 0xFF3A3B41.toInt())
+    val customText get() = int(CUSTOM_TEXT, 0xFFF2F3F5.toInt())
     /** Button on the suggestion bar that switches to another keyboard app. */
     val switchKey get() = bool(SWITCH_KEY, true)
 
@@ -132,6 +160,16 @@ class Settings(context: Context) {
         const val KEY_POPUP = "key_popup"
         const val BG_IMAGE = "bg_image"
         const val BG_DIM = "bg_dim"
+        const val KEY_FONT = "key_font"
+        const val KEY_SHADOWS = "key_shadows"
+        const val CAPITAL_LABELS = "capital_labels"
+        const val SPACE_LABEL = "space_label"
+        const val TRAIL_STYLE = "trail_style"
+        const val TRAIL_WIDTH = "trail_width"
+        const val CUSTOM_BG = "custom_bg"
+        const val CUSTOM_BG2 = "custom_bg2"
+        const val CUSTOM_KEY = "custom_key"
+        const val CUSTOM_TEXT = "custom_text"
         const val SWITCH_KEY = "switch_key"
         private const val LEGACY_ONE_HANDED = "one_handed"
         const val HAPTICS = "haptics"
@@ -176,7 +214,10 @@ class Settings(context: Context) {
         const val BG_VERSION = "bg_version"
 
         /** Settings that change how the keyboard looks. */
-        val APPEARANCE = setOf(THEME, ACCENT, KEY_BORDERS, KEY_RADIUS, KEY_GAP, LABEL_SCALE, BG_IMAGE, BG_DIM, BG_VERSION)
+        val APPEARANCE = setOf(
+            THEME, ACCENT, KEY_BORDERS, KEY_RADIUS, KEY_GAP, LABEL_SCALE, BG_IMAGE, BG_DIM, BG_VERSION, KEY_FONT, KEY_SHADOWS,
+            CAPITAL_LABELS, SPACE_LABEL, TRAIL_STYLE, TRAIL_WIDTH, CUSTOM_BG, CUSTOM_BG2, CUSTOM_KEY, CUSTOM_TEXT,
+        )
 
         inline fun <reified T : Enum<T>> enumValueOrDefault(name: String, def: T): T =
             runCatching { enumValueOf<T>(name) }.getOrDefault(def)
