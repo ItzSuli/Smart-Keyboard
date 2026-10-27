@@ -6,7 +6,9 @@ import androidx.core.content.edit
 import com.itzsuli.smartkeyboard.engine.AutoCorrectMode
 
 enum class AiAutoProof { OFF, SUGGEST, AUTO }
-enum class OneHanded { OFF, LEFT, RIGHT }
+
+/** How key presses feel. CRISP and SOFT use the phone's tuned haptic effects where available. */
+enum class HapticStyle { CRISP, SOFT, CLASSIC, SYSTEM }
 
 /**
  * All user preferences. Backed by one SharedPreferences file that the keyboard and the
@@ -14,6 +16,11 @@ enum class OneHanded { OFF, LEFT, RIGHT }
  */
 class Settings(context: Context) {
     val prefs: SharedPreferences = context.getSharedPreferences("settings", Context.MODE_PRIVATE)
+
+    init {
+        // One-handed mode was removed in 1.2; drop its old value so nothing can pick it up.
+        if (prefs.contains(LEGACY_ONE_HANDED)) prefs.edit { remove(LEGACY_ONE_HANDED) }
+    }
 
     private fun bool(key: String, def: Boolean) = prefs.getBoolean(key, def)
     private fun int(key: String, def: Int) = prefs.getInt(key, def)
@@ -45,11 +52,13 @@ class Settings(context: Context) {
     val keyPopup get() = bool(KEY_POPUP, true)
     val backgroundImage get() = bool(BG_IMAGE, false)
     val backgroundDim get() = int(BG_DIM, 35)
-    val oneHanded get() = enumValueOrDefault(str(ONE_HANDED, OneHanded.OFF.name), OneHanded.OFF)
+    /** Button on the suggestion bar that switches to another keyboard app. */
+    val switchKey get() = bool(SWITCH_KEY, true)
 
     // ---- feedback ----
     val haptics get() = bool(HAPTICS, true)
-    val hapticStrength get() = int(HAPTIC_STRENGTH, 35)
+    val hapticStrength get() = int(HAPTIC_STRENGTH, 45)
+    val hapticStyle get() = enumValueOrDefault(str(HAPTIC_STYLE, HapticStyle.CRISP.name), HapticStyle.CRISP)
     val sound get() = bool(SOUND, false)
     val soundVolume get() = int(SOUND_VOLUME, 40)
     val longPressMs get() = int(LONG_PRESS, 300)
@@ -66,6 +75,8 @@ class Settings(context: Context) {
     val swipeTyping get() = bool(SWIPE, true)
     val swipeTrail get() = bool(SWIPE_TRAIL, true)
     val swipePreview get() = bool(SWIPE_PREVIEW, true)
+    /** One backspace right after a swipe removes the whole swiped word. */
+    val deleteSwipedWord get() = bool(DELETE_SWIPED_WORD, true)
     val spaceCursor get() = bool(SPACE_CURSOR, true)
     val deleteSwipe get() = bool(DELETE_SWIPE, true)
     val emojiKey get() = bool(EMOJI_KEY, true)
@@ -121,9 +132,11 @@ class Settings(context: Context) {
         const val KEY_POPUP = "key_popup"
         const val BG_IMAGE = "bg_image"
         const val BG_DIM = "bg_dim"
-        const val ONE_HANDED = "one_handed"
+        const val SWITCH_KEY = "switch_key"
+        private const val LEGACY_ONE_HANDED = "one_handed"
         const val HAPTICS = "haptics"
         const val HAPTIC_STRENGTH = "haptic_strength"
+        const val HAPTIC_STYLE = "haptic_style"
         const val SOUND = "sound"
         const val SOUND_VOLUME = "sound_volume"
         const val LONG_PRESS = "long_press"
@@ -137,6 +150,7 @@ class Settings(context: Context) {
         const val SWIPE = "swipe"
         const val SWIPE_TRAIL = "swipe_trail"
         const val SWIPE_PREVIEW = "swipe_preview"
+        const val DELETE_SWIPED_WORD = "delete_swiped_word"
         const val SPACE_CURSOR = "space_cursor"
         const val DELETE_SWIPE = "delete_swipe"
         const val EMOJI_KEY = "emoji_key"
@@ -158,6 +172,11 @@ class Settings(context: Context) {
         const val AI_ENABLED = "ai_enabled"
         const val AI_TONE = "ai_tone"
         const val ONBOARDING_DONE = "onboarding_done"
+        /** Bumped when a new background picture is saved. */
+        const val BG_VERSION = "bg_version"
+
+        /** Settings that change how the keyboard looks. */
+        val APPEARANCE = setOf(THEME, ACCENT, KEY_BORDERS, KEY_RADIUS, KEY_GAP, LABEL_SCALE, BG_IMAGE, BG_DIM, BG_VERSION)
 
         inline fun <reified T : Enum<T>> enumValueOrDefault(name: String, def: T): T =
             runCatching { enumValueOf<T>(name) }.getOrDefault(def)

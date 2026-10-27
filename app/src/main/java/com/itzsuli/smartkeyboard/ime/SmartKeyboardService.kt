@@ -1,6 +1,5 @@
 package com.itzsuli.smartkeyboard.ime
 
-import android.content.Context
 import android.content.Intent
 import android.content.SharedPreferences
 import android.content.res.Configuration
@@ -9,10 +8,10 @@ import android.graphics.BitmapFactory
 import android.inputmethodservice.InputMethodService
 import android.media.AudioManager
 import android.os.Build
-import android.os.VibrationEffect
-import android.os.Vibrator
-import android.os.VibratorManager
+import android.os.Handler
+import android.os.Looper
 import android.text.InputType
+import android.util.Log
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
@@ -20,12 +19,10 @@ import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputMethodManager
 import android.widget.FrameLayout
 import android.widget.LinearLayout
-import android.widget.TextView
 import com.itzsuli.smartkeyboard.SmartKeyboardApp
 import com.itzsuli.smartkeyboard.ai.Prompts
 import com.itzsuli.smartkeyboard.data.EmojiData
 import com.itzsuli.smartkeyboard.data.Languages
-import com.itzsuli.smartkeyboard.data.OneHanded
 import com.itzsuli.smartkeyboard.data.Settings
 import com.itzsuli.smartkeyboard.engine.KeyPredictor
 import com.itzsuli.smartkeyboard.engine.Suggestion
@@ -56,18 +53,18 @@ open class SmartKeyboardService : InputMethodService(), KeyboardView.Listener, S
 
     var shiftState = KeyboardView.ShiftState.OFF
         private set
-    private var vibrator: Vibrator? = null
+    private lateinit var haptics: Haptics
     private var audio: AudioManager? = null
+    private val main = Handler(Looper.getMainLooper())
 
     override fun onCreate() {
         super.onCreate()
         app = SmartKeyboardApp.of(this)
         logic = InputLogic(this)
         settings.prefs.registerOnSharedPreferenceChangeListener(this)
-        vibrator = if (Build.VERSION.SDK_INT >= 31) getSystemService(VibratorManager::class.java)?.defaultVibrator
-        else @Suppress("DEPRECATION") getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
+        haptics = Haptics(this, settings)
         audio = getSystemService(AudioManager::class.java)
-        emojiRecents.addAll(settings.prefs.getString("emoji_recents", "")!!.split('\u0001').filter { it.isNotEmpty() })
+        emojiRecents.addAll(settings.prefs.getString(EMOJI_RECENTS, "")!!.split('\u0001').filter { it.isNotEmpty() })
         app.clipboard.enabled = settings.clipboardHistory
         app.clipboard.startListening()
         // Warm up the current language so the first keystrokes already get suggestions.
@@ -163,39 +160,13 @@ open class SmartKeyboardService : InputMethodService(), KeyboardView.Listener, S
         val host = panelHost ?: return
         val kv = keyboardView ?: return
         panel = null
+        // Detach from wherever the keys are now before adding them again (a view can only
+        // have one parent; getting this wrong crashed the app when settings changed).
+        (kv.parent as? ViewGroup)?.removeView(kv)
         host.removeAllViews()
-        val oneHanded = settings.oneHanded
-        if (oneHanded == OneHanded.OFF || resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE) {
-            host.addView(kv, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
-        } else {
-            val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-            val side = oneHandedSide(oneHanded)
-            val kbWidth = (resources.displayMetrics.widthPixels * 0.82f).toInt()
-            if (oneHanded == OneHanded.RIGHT) row.addView(side, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f))
-            row.addView(kv, LinearLayout.LayoutParams(kbWidth, ViewGroup.LayoutParams.MATCH_PARENT))
-            if (oneHanded == OneHanded.LEFT) row.addView(side, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f))
-            host.addView(row, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
-        }
+        host.addView(kv, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
         host.layoutParams = host.layoutParams.apply { height = keyboardHeight() }
         kv.post { kv.layout?.let { logic.onKeyboardLaidOut(it) } }
-    }
-
-    private fun oneHandedSide(current: OneHanded): View = LinearLayout(this).apply {
-        orientation = LinearLayout.VERTICAL
-        gravity = Gravity.CENTER
-        setBackgroundColor(theme.background)
-        fun button(label: String, action: () -> Unit) = TextView(context).apply {
-            text = label
-            textSize = 22f
-            gravity = Gravity.CENTER
-            setTextColor(theme.functionText)
-            setPadding(0, 24, 0, 24)
-            setOnClickListener { action() }
-        }
-        addView(button(if (current == OneHanded.RIGHT) "⇤" else "⇥") {
-            settings.set(Settings.ONE_HANDED, if (current == OneHanded.RIGHT) OneHanded.LEFT else OneHanded.RIGHT)
-        })
-        addView(button("⤢") { settings.set(Settings.ONE_HANDED, OneHanded.OFF) })
     }
 
     private fun showPanel(view: View) {
@@ -228,6 +199,7 @@ open class SmartKeyboardService : InputMethodService(), KeyboardView.Listener, S
         rebuildLayout()
         updateShiftFromEditor()
         strip?.incognito = settings.incognito
+        strip?.switchKey = settings.switchKey
         strip?.aiAvailable = app.ai.isConfigured
         strip?.showAiChip(null)
         logic.refreshSuggestions()
@@ -257,21 +229,46 @@ open class SmartKeyboardService : InputMethodService(), KeyboardView.Listener, S
 
     override fun onSharedPreferenceChanged(prefs: SharedPreferences?, key: String?) {
         if (keyboardView == null) return
+        // The settings app runs in this same process: a keyboard hiccup must never take it
+        // down. Changes are applied after the settings screen's own work, and contained.
+        main.post {
+            try {
+                applySetting(key)
+            } catch (e: Exception) {
+                Log.w(TAG, "Could not apply setting $key", e)
+            }
+        }
+    }
+
+    private fun applySetting(key: String?) {
+        if (keyboardView == null) return
         when (key) {
             Settings.CURRENT_LANGUAGE, Settings.LANGUAGES, Settings.MIXED_LANGUAGES -> { logic.setLanguage(settings.currentLanguage); rebuildLayout() }
             Settings.INCOGNITO -> { strip?.incognito = settings.incognito; currentInputEditorInfo?.let { logic.startInput(it, true) } }
-            Settings.ONE_HANDED, Settings.KEY_HEIGHT, Settings.NUMBER_ROW -> { rebuildLayout(); showKeyboard() }
+            Settings.KEY_HEIGHT, Settings.NUMBER_ROW -> { rebuildLayout(); if (panel == null) showKeyboard() }
             Settings.EMOJI_KEY, Settings.SHOW_HINTS, Settings.ARABIC_DIGITS -> rebuildLayout()
-            else -> if (key?.startsWith("ai_") == true) strip?.aiAvailable = app.ai.isConfigured else applyTheme()
+            Settings.SWITCH_KEY -> strip?.switchKey = settings.switchKey
+            EMOJI_RECENTS -> Unit
+            else -> when {
+                key?.startsWith("ai_") == true -> strip?.aiAvailable = app.ai.isConfigured
+                key in Settings.APPEARANCE -> {
+                    applyTheme()
+                    // Panels are drawn with the old colours: show the keys in the new look.
+                    if (panel != null) showKeyboard()
+                }
+                else -> applyTheme()
+            }
         }
     }
 
     // ------------------------------------------------------------------ layouts
 
+    /** Matches what enter will do (see [InputLogic.onEnter]): Send shows a send arrow, even in multi-line chats. */
     private fun enterIconFor(info: EditorInfo?): KeyIcons.Icon {
         if (info == null) return KeyIcons.Icon.ENTER
-        if (info.inputType and InputType.TYPE_TEXT_FLAG_MULTI_LINE != 0 || info.imeOptions and EditorInfo.IME_FLAG_NO_ENTER_ACTION != 0) return KeyIcons.Icon.ENTER
-        return when (info.imeOptions and EditorInfo.IME_MASK_ACTION) {
+        if (info.imeOptions and EditorInfo.IME_FLAG_NO_ENTER_ACTION != 0) return KeyIcons.Icon.ENTER
+        val action = if (info.actionLabel != null) info.actionId else info.imeOptions and EditorInfo.IME_MASK_ACTION
+        return when (action) {
             EditorInfo.IME_ACTION_SEARCH -> KeyIcons.Icon.SEARCH
             EditorInfo.IME_ACTION_SEND -> KeyIcons.Icon.SEND
             EditorInfo.IME_ACTION_DONE -> KeyIcons.Icon.DONE
@@ -357,8 +354,11 @@ open class SmartKeyboardService : InputMethodService(), KeyboardView.Listener, S
     private var resolverSpatial: com.itzsuli.smartkeyboard.engine.SpatialModel? = null
 
     private fun resolveKey(x: Float, y: Float, candidates: List<Key>): Key? {
-        val strength = when (settings.adaptiveHitbox) { 0 -> 0f; 1 -> 0.5f; 2 -> 0.85f; else -> 1.25f }
-        if (strength <= 0f) return null
+        val level = when (settings.adaptiveHitbox) { 0 -> 0f; 1 -> 0.5f; 2 -> 1f; else -> 1.5f }
+        if (level <= 0f) return null
+        // Backs off for people who keep undoing its picks.
+        val learning = logic.hitboxLearning
+        val strength = level * learning.strengthFactor
         val probs = logic.keyProbabilities ?: return null
         if (resolverKeys !== candidates || resolverInfos.firstOrNull()?.cx != candidates.firstOrNull()?.bounds?.centerX()) {
             resolverKeys = candidates
@@ -372,7 +372,10 @@ open class SmartKeyboardService : InputMethodService(), KeyboardView.Listener, S
             )
         }
         val sp = resolverSpatial ?: return null
-        val chosen = KeyPredictor.resolve(x, y, resolverInfos, probs, sp, strength) ?: return null
+        val chosen = KeyPredictor.resolve(x, y, resolverInfos, probs, sp, strength, damp = learning::damp) ?: return null
+        val under = keyboardView?.keyAt(x, y)
+        val underChar = resolverInfos.getOrNull(candidates.indexOf(under))?.char
+        if (underChar != null) logic.onTapResolved(underChar, chosen.char)
         return candidates[resolverInfos.indexOf(chosen)]
     }
 
@@ -393,13 +396,15 @@ open class SmartKeyboardService : InputMethodService(), KeyboardView.Listener, S
 
     override fun onPopupText(text: String) = logic.onCharacter(text)
 
-    override fun onDelete() = logic.onDelete()
+    override fun onDelete() { logic.onDelete() }
+
+    override fun onRepeatDelete(): Boolean = logic.onDelete()
 
     override fun onDeleteWordsPreview(words: Int) = logic.onDeleteWordsPreview(words)
 
     override fun onDeleteWordsCommit(words: Int) = logic.onDeleteWordsCommit(words)
 
-    override fun onCursorMove(steps: Int) = logic.moveCursor(steps)
+    override fun onCursorMove(steps: Int): Boolean = logic.moveCursor(steps)
 
     override fun onSwipeStart() {
         if (!logic.canSwipe()) return
@@ -415,6 +420,8 @@ open class SmartKeyboardService : InputMethodService(), KeyboardView.Listener, S
     }
 
     override fun onLongPress(key: Key): Boolean = when (key.code) {
+        // Send in a chat, but long-press for a new line.
+        KeyCode.ENTER -> { logic.onNewLine(); true }
         KeyCode.SPACE -> {
             getSystemService(InputMethodManager::class.java)?.showInputMethodPicker()
             true
@@ -425,19 +432,9 @@ open class SmartKeyboardService : InputMethodService(), KeyboardView.Listener, S
         else -> false
     }
 
-    override fun onFeedback(key: Key) {
-        if (settings.haptics) {
-            val strength = settings.hapticStrength
-            val ms = (6 + strength / 6).toLong()
-            val amp = (30 + strength * 2.2f).toInt().coerceIn(1, 255)
-            runCatching {
-                val v = vibrator
-                if (v != null && v.hasVibrator()) {
-                    v.vibrate(VibrationEffect.createOneShot(ms, if (v.hasAmplitudeControl()) amp else VibrationEffect.DEFAULT_AMPLITUDE))
-                }
-            }
-        }
-        if (settings.sound) {
+    override fun onFeedback(key: Key, kind: Haptics.Kind) {
+        haptics.perform(kind, keyboardView)
+        if (settings.sound && (kind == Haptics.Kind.PRESS || kind == Haptics.Kind.REPEAT)) {
             val fx = when (key.code) {
                 KeyCode.DELETE -> AudioManager.FX_KEYPRESS_DELETE
                 KeyCode.SPACE -> AudioManager.FX_KEYPRESS_SPACEBAR
@@ -476,8 +473,6 @@ open class SmartKeyboardService : InputMethodService(), KeyboardView.Listener, S
             SuggestionStripView.ToolbarAction.AI -> if (panel is AiPanel) showKeyboard() else openAi()
             SuggestionStripView.ToolbarAction.CLIPBOARD -> openClipboard()
             SuggestionStripView.ToolbarAction.EMOJI -> openEmoji()
-            SuggestionStripView.ToolbarAction.ONE_HANDED ->
-                settings.set(Settings.ONE_HANDED, if (settings.oneHanded == OneHanded.OFF) OneHanded.RIGHT else OneHanded.OFF)
             SuggestionStripView.ToolbarAction.INCOGNITO -> {
                 val on = !settings.incognito
                 settings.set(Settings.INCOGNITO, on)
@@ -486,6 +481,20 @@ open class SmartKeyboardService : InputMethodService(), KeyboardView.Listener, S
             SuggestionStripView.ToolbarAction.SETTINGS -> openSettings(null)
             SuggestionStripView.ToolbarAction.HIDE -> requestHideSelf(0)
         }
+    }
+
+    override fun onSwitchKeyboard(longPress: Boolean) {
+        haptics.perform(if (longPress) Haptics.Kind.LONG_PRESS else Haptics.Kind.PRESS, strip)
+        val imm = getSystemService(InputMethodManager::class.java) ?: return
+        if (longPress) {
+            // Straight to the next keyboard app; the list if Android can't tell which is next.
+            val switched = runCatching {
+                if (Build.VERSION.SDK_INT >= 28) switchToNextInputMethod(false)
+                else @Suppress("DEPRECATION") imm.switchToNextInputMethod(window?.window?.attributes?.token, false)
+            }.getOrDefault(false)
+            if (switched) return
+        }
+        imm.showInputMethodPicker()
     }
 
     override fun onAiChipTapped() = logic.onAiChipTapped()
@@ -498,7 +507,7 @@ open class SmartKeyboardService : InputMethodService(), KeyboardView.Listener, S
         val data = EmojiData.get(this)
         val p = EmojiPanel(this, data, emojiRecents, onEmoji = { e ->
             logic.onCharacter(e)
-            settings.prefs.edit().putString("emoji_recents", emojiRecents.joinToString("\u0001")).apply()
+            settings.prefs.edit().putString(EMOJI_RECENTS, emojiRecents.joinToString("\u0001")).apply()
         }, onBack = { showKeyboard() }, onDelete = { logic.onDelete() })
         p.applyTheme(theme)
         showPanel(p)
@@ -558,6 +567,8 @@ open class SmartKeyboardService : InputMethodService(), KeyboardView.Listener, S
     }
 
     companion object {
+        private const val TAG = "SmartKeyboard"
+        private const val EMOJI_RECENTS = "emoji_recents"
         const val BACKGROUND_FILE = "keyboard_background.jpg"
     }
 }

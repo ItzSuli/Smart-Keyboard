@@ -96,6 +96,17 @@ class InputLogic(private val service: SmartKeyboardService) {
     private var resultAutoLanguage = -1
     private var stripList: List<Suggestion> = emptyList()
 
+    // ---- adaptive keys learning ----
+    /** Taps where the adaptive keys typed a neighbour of the key under the finger: index → (under finger, typed). */
+    private val tapOverrides = HashMap<Int, Pair<Char, Char>>()
+    private var pendingOverride: Pair<Char, Char>? = null
+    val hitboxLearning = HitboxLearning(app.store)
+
+    /** Called by the key resolver just before the tap is delivered. */
+    fun onTapResolved(underFinger: Char, typed: Char) {
+        pendingOverride = if (underFinger != typed) underFinger to typed else null
+    }
+
     /** Last autocorrection, so backspace can undo it. */
     private class LastCorrection(val typed: String, val committed: String, var separator: String, val language: Int)
     private var lastCorrection: LastCorrection? = null
@@ -147,6 +158,7 @@ class InputLogic(private val service: SmartKeyboardService) {
         resetComposing(finish = false)
         app.ai.cancelPredictions()
         saveTouchModel()
+        hitboxLearning.save()
         app.store.flushAsync()
     }
 
@@ -216,6 +228,7 @@ class InputLogic(private val service: SmartKeyboardService) {
         if (finish && composing.isNotEmpty()) ic?.finishComposingText()
         composing.setLength(0)
         touches.clear()
+        tapOverrides.clear()
         composingFromSwipe = false
         swipeAlternatives = emptyList()
         result = SuggestionResult.EMPTY
@@ -295,12 +308,23 @@ class InputLogic(private val service: SmartKeyboardService) {
 
     fun onCharacter(raw: String, x: Float = Float.NaN, y: Float = Float.NaN) {
         aiUndo = null
+        val override = pendingOverride
+        pendingOverride = null
         val text = applyShift(raw)
         val isWordPart = text.all { TextUtils.isWordChar(it) } &&
             !(text == "'" && composing.isEmpty()) // a lone apostrophe starts a quote, not a word
         if (isWordPart && allowSuggestions) {
+            // A letter tapped right after a swiped word starts a new word ("hello" + "I" → "hello I").
+            if (composingFromSwipe && composing.isNotEmpty() && text.any { it.isLetter() }) {
+                ic?.let { conn ->
+                    conn.beginBatchEdit()
+                    commitComposing(autocorrect = false, separator = " ")
+                    conn.endBatchEdit()
+                }
+            }
             if (composing.isEmpty()) composingStart = cursor
             composing.append(text)
+            if (override != null && text.length == 1) tapOverrides[composing.length - 1] = override
             if (text.length == 1) touches.add(TypedChar(text[0], x, y)) else text.forEach { touches.add(TypedChar(it)) }
             setComposing(composing)
             autoSpaced = false
@@ -405,6 +429,8 @@ class InputLogic(private val service: SmartKeyboardService) {
         val typedTouches = touches.toList()
         val fromSwipe = composingFromSwipe
         val recent = recentWords()
+        // Letters the adaptive keys picked that survived into the word were good calls.
+        for ((i, pair) in tapOverrides) if (final.getOrNull(i)?.lowercaseChar() == pair.second) hitboxLearning.kept(pair.first, pair.second)
         commit(final + separator)
         resetComposing(finish = false)
         learn(final, ctx, recent, typedTouches, fromSwipe)
@@ -442,31 +468,44 @@ class InputLogic(private val service: SmartKeyboardService) {
         app.store.putValue(TOUCH_KEY, touchModel.serialize())
     }
 
+    /**
+     * Enter does what the app asks for, exactly like the stock Android keyboard: Send in a chat
+     * (Snapchat, WhatsApp...), Search, Go, Next or Done, even in fields that can hold several
+     * lines. Only fields that ask for plain new lines get one. Long-press enter always types a
+     * new line ([onNewLine]).
+     */
     fun onEnter() {
+        val action = enterAction(editorInfo)
+        if (action == null) { onNewLine(); return }
+        val conn = ic ?: return
+        conn.beginBatchEdit()
+        if (composing.isNotEmpty()) commitComposing(autocorrect = true, separator = "")
+        conn.endBatchEdit()
+        autoSpaced = false
+        lastCorrection = null
+        conn.performEditorAction(action)
+        service.afterSeparator()
+        refreshSuggestions()
+    }
+
+    fun onNewLine() {
         val conn = ic ?: return
         conn.beginBatchEdit()
         val corrected = if (composing.isNotEmpty()) commitComposing(autocorrect = true, separator = "") else null
+        commit("\n")
         conn.endBatchEdit()
         autoSpaced = false
-        val info = editorInfo
-        val action = (info?.imeOptions ?: 0) and EditorInfo.IME_MASK_ACTION
-        val multiLine = info != null && info.inputType and InputType.TYPE_TEXT_FLAG_MULTI_LINE != 0
-        val noEnterAction = info != null && info.imeOptions and EditorInfo.IME_FLAG_NO_ENTER_ACTION != 0
-        if (!multiLine && !noEnterAction && action != EditorInfo.IME_ACTION_NONE && action != EditorInfo.IME_ACTION_UNSPECIFIED) {
-            conn.performEditorAction(action)
-        } else {
-            commit("\n")
-            corrected?.let { it.separator = "\n"; lastCorrection = it }
-            maybeProofreadLastSentence()
-        }
+        corrected?.let { it.separator = "\n"; lastCorrection = it }
+        maybeProofreadLastSentence()
         service.afterSeparator()
         refreshSuggestions()
     }
 
     // ------------------------------------------------------------------ deleting
 
-    fun onDelete() {
-        val conn = ic ?: return
+    /** Returns false when there was nothing to delete (so a held delete stops vibrating). */
+    fun onDelete(): Boolean {
+        val conn = ic ?: return false
         aiUndo = null
         // Backspace right after an autocorrection brings back what was typed — and remembers it.
         val lc = lastCorrection
@@ -491,12 +530,21 @@ class InputLogic(private val service: SmartKeyboardService) {
                 }
                 service.showStripMessage("Got it — I won't change “${lc.typed}” again")
                 refreshSuggestions()
-                return
+                return true
             }
         }
         lastCorrection = null
         autoSpaced = false
+        if (composing.isNotEmpty() && composingFromSwipe && settings.deleteSwipedWord) {
+            // One backspace (or the first step of a held one) takes back the whole swiped word.
+            commit("")
+            resetComposing(finish = false)
+            refreshSuggestions()
+            service.updateShiftFromEditor()
+            return true
+        }
         if (composing.isNotEmpty()) {
+            tapOverrides.remove(composing.length - 1)?.let { (from, to) -> hitboxLearning.undone(from, to) }
             composing.setLength(composing.length - 1)
             if (touches.isNotEmpty()) touches.removeAt(touches.size - 1)
             if (composing.isEmpty()) {
@@ -508,8 +556,9 @@ class InputLogic(private val service: SmartKeyboardService) {
             }
             refreshSuggestions()
             service.updateShiftFromEditor()
-            return
+            return true
         }
+        var deleted = true
         val selected = conn.getSelectedText(0)
         if (!selected.isNullOrEmpty()) {
             conn.commitText("", 1)
@@ -521,6 +570,7 @@ class InputLogic(private val service: SmartKeyboardService) {
                 conn.sendKeyEvent(android.view.KeyEvent(android.view.KeyEvent.ACTION_DOWN, android.view.KeyEvent.KEYCODE_DEL))
                 conn.sendKeyEvent(android.view.KeyEvent(android.view.KeyEvent.ACTION_UP, android.view.KeyEvent.KEYCODE_DEL))
                 expect(-1)
+                deleted = false
             } else {
                 // Delete one whole character as the user sees it (emoji with skin tone, flags...).
                 val it = BreakIterator.getCharacterInstance()
@@ -534,6 +584,7 @@ class InputLogic(private val service: SmartKeyboardService) {
         }
         service.updateShiftFromEditor()
         refreshSuggestions()
+        return deleted
     }
 
     /** After deleting back into a word, make it editable again so its suggestions show up. */
@@ -551,6 +602,16 @@ class InputLogic(private val service: SmartKeyboardService) {
         composing.append(word)
         word.forEach { touches.add(TypedChar(it)) }
         composingStart = cursor - word.length
+    }
+
+    /** Which editor action enter performs here, or null for a plain new line (LatinIME rules). */
+    private fun enterAction(info: EditorInfo?): Int? {
+        if (info == null) return null
+        if (info.imeOptions and EditorInfo.IME_FLAG_NO_ENTER_ACTION != 0) return null
+        // An app-specific label ("Send", "Post"...) goes with the app's own action id.
+        if (info.actionLabel != null) return info.actionId
+        val action = info.imeOptions and EditorInfo.IME_MASK_ACTION
+        return if (action == EditorInfo.IME_ACTION_NONE) null else action
     }
 
     fun onDeleteWordsPreview(words: Int) {
@@ -579,10 +640,11 @@ class InputLogic(private val service: SmartKeyboardService) {
         refreshSuggestions()
     }
 
-    fun moveCursor(steps: Int) {
-        val conn = ic ?: return
+    /** Space-bar cursor control. Returns false when the cursor is already at the start/end. */
+    fun moveCursor(steps: Int): Boolean {
+        val conn = ic ?: return false
         if (composing.isNotEmpty()) { conn.finishComposingText(); resetComposing(false) }
-        if (cursor < 0) return
+        if (cursor < 0) return false
         val target = if (steps < 0) {
             val before = textBefore(-steps).length
             cursor - before
@@ -590,8 +652,19 @@ class InputLogic(private val service: SmartKeyboardService) {
             val after = (conn.getTextAfterCursor(steps, 0) ?: "").length
             cursor + after
         }
+        if (target == cursor) return false
         conn.setSelection(target, target)
+        // Tracked as our own edit, so fast steps build on each other; suggestions catch up
+        // once the finger rests.
+        expect(target)
+        lastCorrection = null
+        autoSpaced = false
+        main.removeCallbacks(cursorSettled)
+        main.postDelayed(cursorSettled, 150)
+        return true
     }
+
+    private val cursorSettled = Runnable { refreshAfterCursorChange() }
 
     // ------------------------------------------------------------------ suggestions
 
@@ -953,6 +1026,7 @@ class InputLogic(private val service: SmartKeyboardService) {
 
     fun shutdown() {
         saveTouchModel()
+        hitboxLearning.save()
         worker.shutdown()
     }
 

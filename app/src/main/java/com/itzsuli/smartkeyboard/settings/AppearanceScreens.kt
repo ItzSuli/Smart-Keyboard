@@ -44,7 +44,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.itzsuli.smartkeyboard.data.Languages
-import com.itzsuli.smartkeyboard.data.OneHanded
+import com.itzsuli.smartkeyboard.data.HapticStyle
 import com.itzsuli.smartkeyboard.data.Settings
 import com.itzsuli.smartkeyboard.engine.AutoCorrectMode
 import com.itzsuli.smartkeyboard.ime.KeyboardTheme
@@ -63,7 +63,6 @@ fun AppearanceScreen(onBack: () -> Unit) {
     val accent by setting(Settings.ACCENT) { it.customAccent }
     val radius by setting(Settings.KEY_RADIUS) { it.keyRadiusDp }
     val borders by setting(Settings.KEY_BORDERS) { it.keyBorders }
-    val oneHanded by setting(Settings.ONE_HANDED) { it.oneHanded }
     val hasImage by setting(Settings.BG_IMAGE) { it.backgroundImage }
     val dark = KeyboardTheme.systemIsDark(context)
 
@@ -71,7 +70,7 @@ fun AppearanceScreen(onBack: () -> Unit) {
         if (uri != null && saveBackground(context, uri)) {
             s.set(Settings.BG_IMAGE, true)
             // Tells a running keyboard to reload the picture even if the flag was already on.
-            s.set("bg_version", System.currentTimeMillis())
+            s.set(Settings.BG_VERSION, System.currentTimeMillis())
         }
     }
 
@@ -155,13 +154,6 @@ fun AppearanceScreen(onBack: () -> Unit) {
                 }
             }
         }
-        item {
-            Group("One-handed mode") {
-                ChoiceSetting("Keyboard width", "Also toggled from the keyboard's toolbar", listOf(OneHanded.OFF to "Full", OneHanded.LEFT to "Left", OneHanded.RIGHT to "Right"), oneHanded) {
-                    s.set(Settings.ONE_HANDED, it)
-                }
-            }
-        }
     }
 }
 
@@ -185,6 +177,7 @@ fun TypingScreen(onBack: () -> Unit) {
     val hitbox by setting(Settings.ADAPTIVE_HITBOX) { it.adaptiveHitbox }
     val swipe by setting(Settings.SWIPE) { it.swipeTyping }
     val haptics by setting(Settings.HAPTICS) { it.haptics }
+    val hapticStyle by setting(Settings.HAPTIC_STYLE) { it.hapticStyle }
     val sound by setting(Settings.SOUND) { it.sound }
     SettingsPage("Typing & swipe", onBack) {
         item {
@@ -208,7 +201,7 @@ fun TypingScreen(onBack: () -> Unit) {
                 SwitchSetting(Settings.EMOJI_SUGGESTIONS, "Emoji suggestions", "e.g. “pizza” suggests 🍕") { it.emojiSuggestions }
                 ChoiceSetting(
                     "Adaptive touch targets",
-                    "Like on the iPhone: the letters you're most likely to type next get a bigger invisible hit area, so fast typing lands on the right key.",
+                    "Like on the iPhone: the letters you're most likely to type next get a slightly bigger invisible hit area at the edges of the keys. The middle of every key always types that key. When you delete a letter it picked, it learns to back off for that pair of keys.",
                     listOf(0 to "Off", 1 to "Subtle", 2 to "Balanced", 3 to "Strong"), hitbox,
                 ) { s.set(Settings.ADAPTIVE_HITBOX, it) }
             }
@@ -219,11 +212,13 @@ fun TypingScreen(onBack: () -> Unit) {
                 if (swipe) {
                     SwitchSetting(Settings.SWIPE_TRAIL, "Show swipe trail") { it.swipeTrail }
                     SwitchSetting(Settings.SWIPE_PREVIEW, "Live word preview while swiping") { it.swipePreview }
+                    SwitchSetting(Settings.DELETE_SWIPED_WORD, "Delete a swiped word with one backspace", "Right after swiping, ⌫ removes the whole word") { it.deleteSwipedWord }
                 }
             }
         }
         item {
             Group("Gestures & keys") {
+                SwitchSetting(Settings.SWITCH_KEY, "Switch-keyboard button", "Button on the right of the suggestion bar: tap to pick another keyboard app, hold to jump to the next one") { it.switchKey }
                 SwitchSetting(Settings.SPACE_CURSOR, "Slide on space bar to move the cursor") { it.spaceCursor }
                 SwitchSetting(Settings.DELETE_SWIPE, "Swipe left from ⌫ to delete words") { it.deleteSwipe }
                 SliderSetting(Settings.LONG_PRESS, "Long-press delay", 150..700, step = 25, format = { "$it ms" }) { it.longPressMs }
@@ -233,7 +228,18 @@ fun TypingScreen(onBack: () -> Unit) {
         item {
             Group("Feedback") {
                 SwitchSetting(Settings.HAPTICS, "Vibrate on key press") { it.haptics }
-                if (haptics) SliderSetting(Settings.HAPTIC_STRENGTH, "Vibration strength", 1..100, format = { "$it%" }) { it.hapticStrength }
+                if (haptics) {
+                    ChoiceSetting(
+                        "Vibration feel", when (hapticStyle) {
+                            HapticStyle.CRISP -> "Short, sharp clicks using your phone's precise haptics. Held delete and cursor moves tick lightly."
+                            HapticStyle.SOFT -> "Gentler, lighter ticks."
+                            HapticStyle.CLASSIC -> "Plain buzz, like older keyboards."
+                            HapticStyle.SYSTEM -> "Exactly like your phone's own keyboard (follows the system touch-feedback setting)."
+                        },
+                        listOf(HapticStyle.CRISP to "Crisp", HapticStyle.SOFT to "Soft", HapticStyle.CLASSIC to "Classic", HapticStyle.SYSTEM to "System"), hapticStyle,
+                    ) { s.set(Settings.HAPTIC_STYLE, it) }
+                    if (hapticStyle != HapticStyle.SYSTEM) SliderSetting(Settings.HAPTIC_STRENGTH, "Vibration strength", 1..100, format = { "$it%" }) { it.hapticStrength }
+                }
                 SwitchSetting(Settings.SOUND, "Sound on key press") { it.sound }
                 if (sound) SliderSetting(Settings.SOUND_VOLUME, "Volume", 5..100, step = 5, format = { "$it%" }) { it.soundVolume }
             }

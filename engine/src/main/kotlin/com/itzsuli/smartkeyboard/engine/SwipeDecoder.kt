@@ -206,6 +206,9 @@ class SwipeDecoder(val geometry: KeyGeometry, val tuning: Tuning = Tuning()) {
                 val d = dist(ux[t], uy[t], cx[k], cy[k])
                 if (d > radius) break
                 if (d < bestD) { bestD = d; bestJ = t }
+                // Moving on: the visit ends here even if the next letter is a neighbour and the
+                // path never leaves this key's radius ("there": e → r → e).
+                else if (d > bestD + LEAVE) break
                 t++
             }
             if (last) {
@@ -271,6 +274,8 @@ class SwipeDecoder(val geometry: KeyGeometry, val tuning: Tuning = Tuning()) {
         private const val MIN_RATIO = 0.5f
         private const val MAX_RATIO = 2.4f
         private const val MAX_DTW = 160
+        /** How far (key widths) the path must move away from a key to count as having left it. */
+        private const val LEAVE = 0.3f
 
         fun dist(x1: Float, y1: Float, x2: Float, y2: Float): Float {
             val dx = x1 - x2

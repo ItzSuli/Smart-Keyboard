@@ -25,7 +25,9 @@
 | Dictionaries | OpenSubtitles frequencies (spoken, everyday language, swear words included) + Tatoeba sentences for context (bigrams/trigrams) and capitalisation + curated slang/swear lists per language. Built by `tools/build_dictionaries.py` into compact binary packs (≈ 0.4–1.7 MB each). |
 | Learning | Per-language user lexicon (SQLite): word counts (slang confirmed after 2 uses), bigrams/trigrams of the user's phrases, accepted corrections, undone corrections, blocked words, per-key touch offsets. Mixed into the language model with weights that grow with evidence in each context. Accepted AI typo fixes become local autocorrect rules; the user's slang is sent to the LLM so it is preserved. |
 | Swipe | SHARK²-style decoding: candidates indexed by first/last key, in-order pass-through filter, DTW shape distance, key-fit and length terms, plus the language model (which includes learned words). Tuned on synthetic sloppy gestures. |
-| Adaptive keys | Next-letter distribution from the trie (dictionary), context predictions and personal words; a tap is resolved by Gaussian touch likelihood × letter probability, with a protected inner zone per key so taps on the centre are never stolen. |
+| Adaptive keys | Next-letter distribution from the trie (dictionary), context predictions and personal words; a tap is resolved by Gaussian touch likelihood × letter probability. Only the outer quarter of each key is shared (measured from where this person usually hits the key), a likelier neighbour's advantage is capped, and each (key under finger → picked key) pair backs off when the user deletes its picks (`HitboxLearning`). Tuned on simulated thumb typing (`AdaptiveKeysBenchmarkTest`): steals of correct taps 0.2–0.4 % at Balanced, about a third of the first version's. |
+| Enter key | Same rules as the stock Android keyboard (LatinIME): perform the app's action (Send, Search, Go…) unless the app sets `IME_FLAG_NO_ENTER_ACTION` or the action is NONE; an app's custom label uses its `actionId`. Multi-line chat boxes (Snapchat, WhatsApp) therefore send. Long-press enter types a new line. |
+| Haptics | Composition primitives (CLICK/TICK, scaled by the strength slider) where the vibrator supports them, the phone's predefined click effects otherwise, short amplitude pulses on old phones; held delete and cursor moves use lighter ticks, one per actual change. |
 | Mixed typing | Several Latin-script languages on one keyboard. Each language keeps its own model and user lexicon; a `LanguageMix` estimates per-language weights from the last words (capped per-word evidence, decay, weaker across sentence ends, prior from how much the user writes in each language plus a nudge to the keyboard's language). `MixedSuggester` runs every language's suggester and merges by weighted score. Cross-language safety: a word valid in any mixed language is only changed by the currently dominant language; case-only fixes (German nouns) only while that language dominates; undone corrections and personal words count across all languages. Committed words are learned into the language with the highest P(word given language) × weight. |
 | Signing | No key is committed (the repo is public). CI signs with a private key from repository secrets, or with a one-off key until those exist (see `RELEASING.md`). |
 
@@ -55,10 +57,12 @@ app/
 ## Testing
 
 - `engine` — dictionary/LM/corrector/swipe unit tests, a typo benchmark (fix rate ≥ 90 %, zero
-  slang/swear changes) and a swipe benchmark (top-1 ≥ 80 %, top-3 ≥ 93 %; currently 96 % / 99 %).
+  slang/swear changes), a swipe benchmark (top-1 ≥ 80 %, top-3 ≥ 93 %; currently 96.5 % / 100 %) and an
+  adaptive-keys benchmark (must fix more slips than plain geometry and almost never change a correct tap).
 - `app` — Robolectric tests drive the real `InputMethodService` against a real `EditText`
-  (typing, autocorrect + undo, learning, punctuation, swipe, AI proofreading against a fake
-  server), check each AI provider's request/response handling, and render keyboard and settings
+  (typing, autocorrect + undo, learning, punctuation, swipe and its spacing/undo, enter sending in
+  multi-line chats, cursor and delete limits, changing every setting while typing, AI proofreading
+  against a fake server), check each AI provider's request/response handling, and render keyboard and settings
   screenshots.
 
 ## Known limits / next steps

@@ -1,7 +1,9 @@
 package com.itzsuli.smartkeyboard.engine
 
+import kotlin.math.abs
 import kotlin.math.ln
 import kotlin.math.max
+import kotlin.math.min
 
 /**
  * Predicts which letter comes next, for adaptive touch targets: the likelier a key, the
@@ -75,11 +77,27 @@ class KeyPredictor(private val lm: LanguageModel) {
         private const val CONTEXT_WEIGHT = 1f
         private const val USER_WEIGHT = 0.6f
 
+        /** How far adaptive hit areas may reach. Sizes are fractions of the half key. */
+        data class Tuning(
+            /** Taps inside this part of a key always type it (only the border is shared). */
+            val innerX: Float = 0.75f,
+            val innerY: Float = 0.71f,
+            /** How much letter likelihood counts against touch distance. */
+            val priorWeight: Float = 0.2f,
+            /** A likelier neighbour can never be favoured by more than this (natural log). */
+            val maxLogRatio: Float = 3f,
+        )
+
+        val DEFAULT_TUNING = Tuning()
+
         /**
          * Picks the key for a touch: plain distance, nudged by letter likelihood. A touch well
-         * inside a key always types that key; only the border zone between keys is shared.
+         * inside a key always types that key; only the border zone between keys is shared, and
+         * how far a likely neighbour can reach is bounded.
          *
-         * @param strength 0 = off, ~1 = strong adaptation.
+         * @param strength 0 = off, 1 = balanced, 1.5 = strong.
+         * @param damp learned trust per (key under the finger, neighbour) pair, 0..1: pairs whose
+         *   "help" the user keeps undoing reach less far.
          */
         fun resolve(
             x: Float, y: Float,
@@ -87,30 +105,39 @@ class KeyPredictor(private val lm: LanguageModel) {
             probabilities: Map<Char, Float>?,
             spatial: SpatialModel,
             strength: Float,
+            tuning: Tuning = DEFAULT_TUNING,
+            damp: (from: Char, to: Char) -> Float = { _, _ -> 1f },
         ): KeyInfo? {
             if (keys.isEmpty()) return null
             val direct = keys.firstOrNull { x >= it.cx - it.width / 2 && x < it.cx + it.width / 2 && y >= it.cy - it.height / 2 && y < it.cy + it.height / 2 }
             if (probabilities == null || strength <= 0f) return direct ?: keys.minByOrNull { spatial.touchCost(x, y, it) }
             if (direct != null) {
-                val rx = (x - direct.cx) / (direct.width / 2)
-                val ry = (y - direct.cy) / (direct.height / 2)
-                if (rx * rx + ry * ry < INNER_ZONE * INNER_ZONE) return direct
+                // Measured from where this person usually hits the key, not its drawn centre.
+                val (ex, ey) = spatial.expectedPoint(direct)
+                val rx = (x - ex) / (direct.width / 2)
+                val ry = (y - ey) / (direct.height / 2)
+                if (abs(rx) < tuning.innerX && abs(ry) < tuning.innerY) return direct
             }
+            val floor = 0.002
+            fun logP(k: KeyInfo) = ln(max(floor, (probabilities[k.char.lowercaseChar()] ?: 0f).toDouble()))
+            val directLogP = direct?.let { logP(it) }
             var best: KeyInfo? = null
             var bestScore = Double.NEGATIVE_INFINITY
-            val floor = 0.002
             for (k in keys) {
                 // Only immediate neighbours compete.
-                if (kotlin.math.abs(k.cx - x) > k.width * 1.4f || kotlin.math.abs(k.cy - y) > k.height * 1.2f) continue
+                if (abs(k.cx - x) > k.width * 1.4f || abs(k.cy - y) > k.height * 1.2f) continue
                 val geo = -spatial.touchCost(x, y, k) * LN10
-                val p = max(floor, (probabilities[k.char.lowercaseChar()] ?: 0f).toDouble())
-                val score = geo + strength * ln(p) * 0.35
+                var prior = logP(k)
+                if (direct != null && k !== direct) {
+                    val gain = min(prior - directLogP!!, tuning.maxLogRatio.toDouble())
+                    prior = directLogP + if (gain > 0) gain * damp(direct.char.lowercaseChar(), k.char.lowercaseChar()) else gain
+                }
+                val score = geo + strength * tuning.priorWeight * prior
                 if (score > bestScore) { bestScore = score; best = k }
             }
             return best ?: direct
         }
 
-        private const val INNER_ZONE = 0.55f
         private val LN10 = ln(10.0)
     }
 }

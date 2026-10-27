@@ -24,7 +24,7 @@ class MiscEngineTest {
         val e = geo.keyFor('e')!!
         val r = geo.keyFor('r')!!
         // Touch slightly inside "r", close to the e/r border.
-        val x = (e.cx + r.cx) / 2 + 8f
+        val x = (e.cx + r.cx) / 2 + 6f
         assertEquals('r', KeyPredictor.resolve(x, e.cy, geo.keys, null, spatial, 1f)!!.char)
         assertEquals('e', KeyPredictor.resolve(x, e.cy, geo.keys, probs, spatial, 1f)!!.char)
         // A touch in the middle of "r" is always "r".

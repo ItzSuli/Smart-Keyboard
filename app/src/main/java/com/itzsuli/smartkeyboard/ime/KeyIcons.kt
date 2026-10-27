@@ -8,7 +8,7 @@ import kotlin.math.min
 
 /** Crisp vector icons for function keys (font glyphs look different on every phone). */
 object KeyIcons {
-    enum class Icon { SHIFT, SHIFT_ON, CAPS_LOCK, DELETE, ENTER, SEARCH, SEND, DONE, NEXT, GLOBE, EMOJI, SPARKLE, CLIPBOARD, SETTINGS, KEYBOARD, MIC, UNDO, ONE_HAND, CLOSE, INCOGNITO }
+    enum class Icon { SHIFT, SHIFT_ON, CAPS_LOCK, DELETE, ENTER, SEARCH, SEND, DONE, NEXT, GLOBE, EMOJI, SPARKLE, CLIPBOARD, SETTINGS, KEYBOARD, KEYBOARD_HIDE, SWITCH_KEYBOARD, MIC, UNDO, CLOSE, INCOGNITO }
 
     private val path = Path()
 
@@ -124,13 +124,29 @@ object KeyIcons {
                 }
                 canvas.drawCircle(cx, cy, s * 0.52f, paint)
             }
-            Icon.KEYBOARD -> {
-                canvas.drawRoundRect(RectF(cx - s * 0.85f, cy - s * 0.55f, cx + s * 0.85f, cy + s * 0.55f), s * 0.15f, s * 0.15f, paint)
-                paint.style = Paint.Style.FILL
-                for (r in 0..1) for (c in 0..3) {
-                    canvas.drawCircle(cx - s * 0.48f + c * s * 0.32f, cy - s * 0.22f + r * s * 0.3f, s * 0.06f, paint)
-                }
-                canvas.drawRect(cx - s * 0.35f, cy + s * 0.28f, cx + s * 0.35f, cy + s * 0.36f, paint)
+            Icon.KEYBOARD -> drawKeyboard(canvas, cx, cy, s, paint)
+            Icon.KEYBOARD_HIDE -> {
+                // Keyboard with a chevron underneath: "put the keyboard away".
+                drawKeyboard(canvas, cx, cy - s * 0.22f, s * 0.8f, paint)
+                paint.style = Paint.Style.STROKE
+                path.moveTo(cx - s * 0.25f, cy + s * 0.55f)
+                path.lineTo(cx, cy + s * 0.78f)
+                path.lineTo(cx + s * 0.25f, cy + s * 0.55f)
+                canvas.drawPath(path, paint)
+            }
+            Icon.SWITCH_KEYBOARD -> {
+                // Keyboard with a two-way arrow underneath: "change keyboard app".
+                drawKeyboard(canvas, cx, cy - s * 0.24f, s * 0.8f, paint)
+                paint.style = Paint.Style.STROKE
+                val ay = cy + s * 0.66f
+                canvas.drawLine(cx - s * 0.6f, ay, cx + s * 0.6f, ay, paint)
+                path.moveTo(cx - s * 0.38f, ay - s * 0.2f)
+                path.lineTo(cx - s * 0.6f, ay)
+                path.lineTo(cx - s * 0.38f, ay + s * 0.2f)
+                path.moveTo(cx + s * 0.38f, ay - s * 0.2f)
+                path.lineTo(cx + s * 0.6f, ay)
+                path.lineTo(cx + s * 0.38f, ay + s * 0.2f)
+                canvas.drawPath(path, paint)
             }
             Icon.MIC -> {
                 canvas.drawRoundRect(RectF(cx - s * 0.25f, cy - s * 0.75f, cx + s * 0.25f, cy + s * 0.2f), s * 0.25f, s * 0.25f, paint)
@@ -143,10 +159,6 @@ object KeyIcons {
                 path.lineTo(cx - s * 0.5f, cy + s * 0.05f)
                 path.lineTo(cx - s * 0.12f, cy - s * 0.25f)
                 canvas.drawPath(path, paint)
-            }
-            Icon.ONE_HAND -> {
-                canvas.drawRoundRect(RectF(cx - s * 0.4f, cy - s * 0.8f, cx + s * 0.4f, cy + s * 0.8f), s * 0.15f, s * 0.15f, paint)
-                canvas.drawLine(cx - s * 0.15f, cy + s * 0.55f, cx + s * 0.15f, cy + s * 0.55f, paint)
             }
             Icon.CLOSE -> {
                 canvas.drawLine(cx - s * 0.5f, cy - s * 0.5f, cx + s * 0.5f, cy + s * 0.5f, paint)
@@ -177,6 +189,16 @@ object KeyIcons {
         path.quadTo(cx - i * 0.3f, cy + i * 0.3f, cx - r, cy)
         path.quadTo(cx - i * 0.3f, cy - i * 0.3f, cx, cy - r)
         path.close()
+    }
+
+    private fun drawKeyboard(canvas: Canvas, cx: Float, cy: Float, s: Float, paint: Paint) {
+        paint.style = Paint.Style.STROKE
+        canvas.drawRoundRect(RectF(cx - s * 0.85f, cy - s * 0.55f, cx + s * 0.85f, cy + s * 0.55f), s * 0.15f, s * 0.15f, paint)
+        paint.style = Paint.Style.FILL
+        for (r in 0..1) for (c in 0..3) {
+            canvas.drawCircle(cx - s * 0.48f + c * s * 0.32f, cy - s * 0.22f + r * s * 0.3f, s * 0.06f, paint)
+        }
+        canvas.drawRect(cx - s * 0.35f, cy + s * 0.28f, cx + s * 0.35f, cy + s * 0.36f, paint)
     }
 
     fun iconSize(rect: RectF): Float = min(rect.width(), rect.height()) * 0.42f

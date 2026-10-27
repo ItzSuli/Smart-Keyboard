@@ -35,14 +35,17 @@ class KeyboardView(context: Context, private val overlay: KeyboardOverlay) : Vie
         fun onKeyTap(key: Key, x: Float, y: Float)
         fun onPopupText(text: String)
         fun onDelete()
+        /** One step of a held delete; false when there was nothing left to delete. */
+        fun onRepeatDelete(): Boolean
         fun onDeleteWordsPreview(words: Int)
         fun onDeleteWordsCommit(words: Int)
-        fun onCursorMove(steps: Int)
+        /** Moves the cursor; false when it could not move (start or end of the text). */
+        fun onCursorMove(steps: Int): Boolean
         fun onSwipeStart()
         fun onSwipeMove(xs: FloatArray, ys: FloatArray, count: Int)
         fun onSwipeEnd(xs: FloatArray, ys: FloatArray, count: Int)
         fun onLongPress(key: Key): Boolean
-        fun onFeedback(key: Key)
+        fun onFeedback(key: Key, kind: Haptics.Kind)
         fun onShiftTap()
         fun onShiftLock()
     }
@@ -97,6 +100,7 @@ class KeyboardView(context: Context, private val overlay: KeyboardOverlay) : Vie
         val downTime = SystemClock.uptimeMillis()
         var cursorAnchor = x
         var deleteWords = 0
+        var popupIndex = -1
         var longPress: Runnable? = null
     }
 
@@ -316,7 +320,7 @@ class KeyboardView(context: Context, private val overlay: KeyboardOverlay) : Vie
         pointers[id] = p
         if (key == null) return
         pressedKeys.add(key)
-        listener?.onFeedback(key)
+        listener?.onFeedback(key, Haptics.Kind.PRESS)
         if (settings?.keyPopup != false && key.type == Key.Type.CHAR && key.code == KeyCode.TEXT) {
             overlay.showPreview(displayLabel(key), toOverlay(key.bounds))
         }
@@ -338,17 +342,19 @@ class KeyboardView(context: Context, private val overlay: KeyboardOverlay) : Vie
             key.code == KeyCode.SHIFT -> {
                 p.mode = Mode.DONE
                 listener?.onShiftLock()
+                listener?.onFeedback(key, Haptics.Kind.LONG_PRESS)
             }
             key.popup.isNotEmpty() -> {
                 p.mode = Mode.POPUP
                 overlay.hidePreview()
                 val options = key.popup.map { if (shiftState != ShiftState.OFF && it.length == 1 && it[0].isLetter()) it.uppercase() else it }
                 overlay.showPopup(options, toOverlay(key.bounds))
-                overlay.selectPopupAt(toOverlayX(p.lastX))
-                listener?.onFeedback(key)
+                p.popupIndex = overlay.selectPopupAt(toOverlayX(p.lastX))
+                listener?.onFeedback(key, Haptics.Kind.LONG_PRESS)
             }
             else -> if (listener?.onLongPress(key) == true) {
                 p.mode = Mode.DONE
+                listener?.onFeedback(key, Haptics.Kind.LONG_PRESS)
                 overlay.hidePreview()
                 pressedKeys.remove(key)
                 invalidate()
@@ -358,15 +364,11 @@ class KeyboardView(context: Context, private val overlay: KeyboardOverlay) : Vie
 
     private fun repeatDelete(p: Pointer, n: Int) {
         if (pointers[p.id] !== p || p.mode != Mode.REPEAT) return
-        listener?.onDelete()
-        if (n % 3 == 0) p.key?.let { listener?.onFeedback(it) }
-        // Speeds up the longer it is held.
-        val next = when {
-            n < 4 -> 90L
-            n < 16 -> 55L
-            else -> 35L
-        }
-        handler.postDelayed({ repeatDelete(p, n + 1) }, next)
+        // Every character that goes gets its own light tick, so the vibration speeds up
+        // exactly with the deleting; nothing left to delete means no buzzing.
+        val deleted = listener?.onRepeatDelete() == true
+        if (deleted) p.key?.let { listener?.onFeedback(it, Haptics.Kind.REPEAT) }
+        handler.postDelayed({ repeatDelete(p, n + 1) }, repeatInterval(n))
     }
 
     private fun move(p: Pointer, x: Float, y: Float) {
@@ -404,7 +406,13 @@ class KeyboardView(context: Context, private val overlay: KeyboardOverlay) : Vie
                     }
                 }
             }
-            Mode.POPUP -> overlay.selectPopupAt(toOverlayX(x))
+            Mode.POPUP -> {
+                val i = overlay.selectPopupAt(toOverlayX(x))
+                if (i != p.popupIndex) {
+                    p.popupIndex = i
+                    listener?.onFeedback(key, Haptics.Kind.TICK)
+                }
+            }
             Mode.SWIPE -> {
                 addSwipePoint(x, y)
                 val now = SystemClock.uptimeMillis()
@@ -419,8 +427,8 @@ class KeyboardView(context: Context, private val overlay: KeyboardOverlay) : Vie
                 if (steps != 0) {
                     p.cursorAnchor += steps * step
                     val rtl = layout?.rtl == true
-                    listener?.onCursorMove(if (rtl) -steps else steps)
-                    listener?.onFeedback(key)
+                    // Only a cursor that really moved ticks: at the start or end of the text it stays quiet.
+                    if (listener?.onCursorMove(if (rtl) -steps else steps) == true) listener?.onFeedback(key, Haptics.Kind.TICK)
                 }
             }
             Mode.DELETE_SWIPE -> {
@@ -428,7 +436,7 @@ class KeyboardView(context: Context, private val overlay: KeyboardOverlay) : Vie
                 if (words != p.deleteWords) {
                     p.deleteWords = words
                     listener?.onDeleteWordsPreview(words)
-                    listener?.onFeedback(key)
+                    listener?.onFeedback(key, Haptics.Kind.TICK)
                 }
             }
             else -> {}
@@ -562,6 +570,9 @@ class KeyboardView(context: Context, private val overlay: KeyboardOverlay) : Vie
         private const val SWIPE_PREVIEW_MS = 90L
         private const val DOUBLE_TAP_MS = 320L
         private const val DELETE_REPEAT_START = 380L
+
+        /** Held delete starts at ~9 characters a second and smoothly reaches ~30. */
+        fun repeatInterval(n: Int): Long = (110.0 * Math.pow(0.9, n.toDouble())).toLong().coerceAtLeast(33L)
         private const val SLIP_MAX_MS = 220L
         private const val SLIP_MAX_UNITS = 1.15f
     }

@@ -60,15 +60,21 @@ Write German on the English keyboard (or any mix of Latin-script languages) with
 ### Swipe typing
 - Glide over the letters. The decoder resamples your path, keeps only words whose letters the path visits in order, then scores shape with dynamic time warping, combined with sentence context and your personal words. Your slang can be swiped too.
 - Live word preview while swiping, smooth fading comet trail, alternatives in the bar, automatic spacing.
-- 96 % top-1 and 99 % top-3 accuracy on 400 common words with simulated sloppy gestures, about 1.6 ms per word (`SwipeDecoderTest`).
+- After a swiped word, tapping a letter starts a new word with a space ("hello" + "I" → "hello I"), and one backspace removes the whole swiped word (can be turned off).
+- 96.5 % top-1 and 100 % top-3 accuracy on 400 common words with simulated sloppy gestures, about 2 ms per word (`SwipeDecoderTest`).
 
 ### iPhone-style adaptive keys
-The letters you're most likely to type next get a bigger *invisible* hit area. It uses the current word, the sentence context and your own vocabulary. A touch near the border between two keys goes to the likelier letter; a touch in the middle of a key always types that key. The keyboard also learns where *you* actually hit each key and shifts its targets over time.
+The letters you're most likely to type next get a bigger *invisible* hit area. It uses the current word, the sentence context and your own vocabulary. Only the outer edge of a key is shared with its neighbours: the middle three quarters of every key always type that key, and how far a likely letter can reach is capped. When you delete a letter it picked ("kis" instead of "kid"), it backs off for that pair of keys from then on. The keyboard also learns where *you* actually hit each key and shifts its targets over time.
+
+On simulated thumb typing (`AdaptiveKeysBenchmarkTest`), "Balanced" cuts mistyped letters from 2.5 % to 0.8 % (careful typing) and from 13.8 % to 6.0 % (sloppy typing), while changing only 0.2–0.4 % of taps that were already on the right key.
 
 ### Everything else
 - **11 languages**, each with its own layout, dictionary, slang and swear words, and its own learned data: English, German (QWERTZ, ä ö ü ß), Arabic (with Arabic-Indic digits option), French (AZERTY), Spanish, Italian, Portuguese, Turkish, Dutch, Russian and Polish. Switch with 🌐.
-- **Looks**: 11 themes plus Material You and Auto (light/dark), custom accent colour, your own background picture, key shape/gap/height/letter size, number row, flat or key-background style, one-handed mode.
-- **Quality of life**: long-press for accents, numbers and symbols; slide on space to move the cursor; swipe left from ⌫ to delete whole words; double-space for a full stop; smart punctuation spacing; clipboard history with pins (password clips are skipped); emoji panel with skin tones; haptics and sound with adjustable strength; incognito mode.
+- **Looks**: 11 themes plus Material You and Auto (light/dark), custom accent colour, your own background picture, key shape/gap/height/letter size, number row, flat or key-background style.
+- **Works with every app's enter key**: Send in Snapchat, WhatsApp and other chats, Search, Go, Next, Done. Long-press enter for a new line.
+- **Switch-keyboard button** on the right of the suggestion bar: tap to pick another keyboard app, hold to jump to the next one (can be hidden).
+- **Haptics that feel right**: crisp clicks from your phone's precise haptic engine (Crisp, Soft, Classic or exactly like the System keyboard), lighter ticks that speed up with held delete, and a cursor tick only when the cursor really moves.
+- **Quality of life**: long-press for accents, numbers and symbols; slide on space to move the cursor; swipe left from ⌫ to delete whole words; double-space for a full stop; smart punctuation spacing; clipboard history with pins (password clips are skipped); emoji panel with skin tones; sound with adjustable volume; incognito mode.
 - **Your data**: everything learned stays on the phone. Manage your words, learned fixes and blocked words, export or import a backup, or reset.
 
 ## Privacy

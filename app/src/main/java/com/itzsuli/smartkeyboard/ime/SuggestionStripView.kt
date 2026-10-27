@@ -28,9 +28,11 @@ class SuggestionStripView(context: Context) : View(context) {
         fun onToolbarAction(action: ToolbarAction)
         fun onAiChipTapped()
         fun onAiChipDismissed()
+        /** The switch-keyboard button: tap shows the keyboard list, long-press jumps to the next one. */
+        fun onSwitchKeyboard(longPress: Boolean)
     }
 
-    enum class ToolbarAction { AI, CLIPBOARD, EMOJI, ONE_HANDED, INCOGNITO, SETTINGS, HIDE }
+    enum class ToolbarAction { AI, CLIPBOARD, EMOJI, INCOGNITO, SETTINGS, HIDE }
 
     var listener: Listener? = null
     var theme: KeyboardTheme = KeyboardTheme.DARK
@@ -38,6 +40,9 @@ class SuggestionStripView(context: Context) : View(context) {
     var incognito = false
         set(value) { field = value; invalidate() }
     var aiAvailable = false
+        set(value) { field = value; invalidate() }
+    /** Shows the switch-keyboard button at the right end of the bar. */
+    var switchKey = true
         set(value) { field = value; invalidate() }
     var aiBusy = false
         set(value) { field = value; invalidate(); if (value) postInvalidateOnAnimation() }
@@ -57,6 +62,15 @@ class SuggestionStripView(context: Context) : View(context) {
     private val slotIndex = IntArray(3) { -1 }
     private val toolbarActions = ArrayList<Pair<ToolbarAction, RectF>>()
     private val aiButton = RectF()
+    private val switchButton = RectF()
+    private var switchPressed = false
+    private var switchLongPressed = false
+    private val switchLongPress = Runnable {
+        switchLongPressed = true
+        switchPressed = false
+        invalidate()
+        listener?.onSwitchKeyboard(longPress = true)
+    }
     private var pressedSlot = -1
     private var downX = 0f
     private var longPressFired = false
@@ -96,7 +110,7 @@ class SuggestionStripView(context: Context) : View(context) {
 
     override fun onDraw(canvas: Canvas) {
         val h = height.toFloat()
-        val w = width.toFloat()
+        val fullWidth = width.toFloat()
         // AI button on the left.
         val btn = h * 0.78f
         aiButton.set(6 * density, (h - btn) / 2, 6 * density + btn, (h + btn) / 2)
@@ -107,7 +121,23 @@ class SuggestionStripView(context: Context) : View(context) {
         KeyIcons.draw(canvas, KeyIcons.Icon.SPARKLE, aiButton.centerX(), aiButton.centerY(), btn * 0.62f * pulse, iconPaint)
         if (aiBusy) postInvalidateOnAnimation()
 
+        // Switch-keyboard button on the right, mirroring the AI button.
+        var right = fullWidth
+        if (switchKey) {
+            switchButton.set(fullWidth - 6 * density - btn, (h - btn) / 2, fullWidth - 6 * density, (h + btn) / 2)
+            if (switchPressed) {
+                fill.color = withAlpha(theme.stripText, 36)
+                canvas.drawRoundRect(switchButton, btn / 2, btn / 2, fill)
+            }
+            iconPaint.color = withAlpha(theme.stripText, 190)
+            KeyIcons.draw(canvas, KeyIcons.Icon.SWITCH_KEYBOARD, switchButton.centerX(), switchButton.centerY(), btn * 0.62f, iconPaint)
+            right = switchButton.left - 4 * density
+        } else {
+            switchButton.setEmpty()
+        }
+
         val left = aiButton.right + 4 * density
+        val w = right
         val msg = message
         val chip = aiChip
         when {
@@ -189,7 +219,7 @@ class SuggestionStripView(context: Context) : View(context) {
 
     private fun drawToolbar(canvas: Canvas, left: Float, right: Float) {
         toolbarActions.clear()
-        val actions = listOf(ToolbarAction.CLIPBOARD, ToolbarAction.EMOJI, ToolbarAction.ONE_HANDED, ToolbarAction.INCOGNITO, ToolbarAction.SETTINGS, ToolbarAction.HIDE)
+        val actions = listOf(ToolbarAction.CLIPBOARD, ToolbarAction.EMOJI, ToolbarAction.INCOGNITO, ToolbarAction.SETTINGS, ToolbarAction.HIDE)
         val h = height.toFloat()
         val cell = (right - left) / actions.size
         for ((i, a) in actions.withIndex()) {
@@ -204,10 +234,9 @@ class SuggestionStripView(context: Context) : View(context) {
             val icon = when (a) {
                 ToolbarAction.CLIPBOARD -> KeyIcons.Icon.CLIPBOARD
                 ToolbarAction.EMOJI -> KeyIcons.Icon.EMOJI
-                ToolbarAction.ONE_HANDED -> KeyIcons.Icon.ONE_HAND
                 ToolbarAction.INCOGNITO -> KeyIcons.Icon.INCOGNITO
                 ToolbarAction.SETTINGS -> KeyIcons.Icon.SETTINGS
-                ToolbarAction.HIDE -> KeyIcons.Icon.KEYBOARD
+                ToolbarAction.HIDE -> KeyIcons.Icon.KEYBOARD_HIDE
                 ToolbarAction.AI -> KeyIcons.Icon.SPARKLE
             }
             KeyIcons.draw(canvas, icon, r.centerX(), r.centerY(), h * 0.46f, iconPaint)
@@ -220,12 +249,27 @@ class SuggestionStripView(context: Context) : View(context) {
             MotionEvent.ACTION_DOWN -> {
                 downX = e.x
                 longPressFired = false
+                switchLongPressed = false
+                if (switchKey && touchesSwitch(e.x, e.y)) {
+                    switchPressed = true
+                    handler.postDelayed(switchLongPress, 450)
+                    invalidate()
+                    return true
+                }
                 pressedSlot = if (message == null && aiChip == null && suggestions.isNotEmpty()) slots.indexOfFirst { it.contains(e.x, e.y) } else -1
                 if (pressedSlot >= 0) handler.postDelayed(longPress, 450)
                 invalidate()
             }
             MotionEvent.ACTION_UP -> {
                 handler.removeCallbacks(longPress)
+                handler.removeCallbacks(switchLongPress)
+                if (switchPressed || switchLongPressed) {
+                    val tapped = switchPressed && touchesSwitch(e.x, e.y)
+                    switchPressed = false
+                    invalidate()
+                    if (tapped && !switchLongPressed) listener?.onSwitchKeyboard(longPress = false)
+                    return true
+                }
                 val slot = pressedSlot
                 pressedSlot = -1
                 invalidate()
@@ -245,12 +289,17 @@ class SuggestionStripView(context: Context) : View(context) {
             }
             MotionEvent.ACTION_CANCEL -> {
                 handler.removeCallbacks(longPress)
+                handler.removeCallbacks(switchLongPress)
+                switchPressed = false
                 pressedSlot = -1
                 invalidate()
             }
         }
         return true
     }
+
+    /** The button plus the gap next to it, so a slightly-off thumb still hits it. */
+    private fun touchesSwitch(x: Float, y: Float) = !switchButton.isEmpty && x >= switchButton.left - 4 * density && y >= 0 && y <= height
 
     private fun withAlpha(c: Int, a: Int) = Color.argb(a, Color.red(c), Color.green(c), Color.blue(c))
 

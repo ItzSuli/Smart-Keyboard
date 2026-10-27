@@ -177,27 +177,182 @@ class KeyboardServiceTest {
         assertEquals("Hello. ", text)
     }
 
-    @Test fun swipeTypesWords() {
-        fun swipe(word: String) {
-            val xs = ArrayList<Float>()
-            val ys = ArrayList<Float>()
-            var px = Float.NaN
-            var py = Float.NaN
-            for (c in word) {
-                val k = key(c.toString())
-                val x = k.bounds.centerX()
-                val y = k.bounds.centerY()
-                if (!px.isNaN()) for (s in 1..12) { xs.add(px + (x - px) * s / 12f); ys.add(py + (y - py) * s / 12f) } else { xs.add(x); ys.add(y) }
-                px = x; py = y
-            }
-            service.onSwipeEnd(xs.toFloatArray(), ys.toFloatArray(), xs.size)
-            waitUntil { edit.text.toString().lowercase().contains(word.takeLast(2)) }
-            sync()
+    private fun swipe(word: String) {
+        val before = text
+        val xs = ArrayList<Float>()
+        val ys = ArrayList<Float>()
+        var px = Float.NaN
+        var py = Float.NaN
+        for (c in word) {
+            val k = key(c.toString())
+            val x = k.bounds.centerX()
+            val y = k.bounds.centerY()
+            if (!px.isNaN()) for (s in 1..12) { xs.add(px + (x - px) * s / 12f); ys.add(py + (y - py) * s / 12f) } else { xs.add(x); ys.add(y) }
+            px = x; py = y
         }
+        service.onSwipeEnd(xs.toFloatArray(), ys.toFloatArray(), xs.size)
+        waitUntil { text != before && text.lowercase().endsWith(word.takeLast(2)) }
+        sync()
+    }
+
+    @Test fun swipeTypesWords() {
         swipe("hello")
         swipe("world")
         type(" ")
         assertEquals("Hello world ", text)
+    }
+
+    @Test fun tappedLetterAfterSwipeStartsANewWord() {
+        swipe("hello")
+        type("i ")
+        assertEquals("Hello I ", text)
+    }
+
+    @Test fun oneBackspaceDeletesTheSwipedWord() {
+        swipe("hello")
+        swipe("world")
+        backspace()
+        assertEquals("Hello ", text)
+        swipe("again")
+        assertEquals("Hello again", text)
+        // Typed (not swiped) words still lose one letter at a time.
+        type(" you")
+        backspace()
+        assertEquals("Hello again yo", text)
+    }
+
+    @Test fun oneBackspaceDeletesOneLetterWhenTurnedOff() {
+        (org.robolectric.RuntimeEnvironment.getApplication() as SmartKeyboardApp).settings.set(Settings.DELETE_SWIPED_WORD, false)
+        idle()
+        swipe("hello")
+        backspace()
+        assertEquals("Hell", text)
+    }
+
+    /** Starts a chat-like field and records the editor actions the keyboard performs. */
+    private fun startChat(inputType: Int, imeOptions: Int, actions: MutableList<Int>) {
+        edit.inputType = inputType
+        val created = EditorInfo()
+        val ic = object : android.view.inputmethod.InputConnectionWrapper(edit.onCreateInputConnection(created), false) {
+            override fun performEditorAction(editorAction: Int): Boolean { actions.add(editorAction); return true }
+        }
+        val info = EditorInfo().apply { this.inputType = inputType; this.imeOptions = imeOptions; initialSelStart = edit.selectionStart; initialSelEnd = edit.selectionEnd }
+        service.testIc = ic
+        service.testInfo = info
+        service.onStartInput(info, false)
+        service.onStartInputView(info, false)
+        layout()
+    }
+
+    private val enterKey get() = keyboard.layout!!.keys.first { it.code == KeyCode.ENTER }
+
+    @Test fun enterSendsInMultiLineChats() {
+        // Snapchat/WhatsApp style: a multi-line message box whose enter key is "Send".
+        val actions = ArrayList<Int>()
+        startChat(InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE or InputType.TYPE_TEXT_FLAG_CAP_SENTENCES, EditorInfo.IME_ACTION_SEND, actions)
+        type("hey whats up")
+        tap(enterKey)
+        assertEquals(listOf(EditorInfo.IME_ACTION_SEND), actions)
+        assertEquals("Hey what's up", text)
+        // Long-press enter still gives a new line.
+        assertTrue(service.onLongPress(enterKey))
+        sync()
+        assertEquals("Hey what's up\n", text)
+        assertEquals(1, actions.size)
+    }
+
+    @Test fun enterTypesNewLineWhereTheAppWantsOne() {
+        val actions = ArrayList<Int>()
+        startChat(InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE, EditorInfo.IME_ACTION_SEND or EditorInfo.IME_FLAG_NO_ENTER_ACTION, actions)
+        type("a")
+        tap(enterKey)
+        assertEquals("a\n", text)
+        assertTrue(actions.isEmpty())
+    }
+
+    @Test fun spaceCursorStopsAtTheEnds() {
+        type("hi")
+        type(" ")
+        assertTrue(service.onCursorMove(-1))
+        sync()
+        assertEquals(2, edit.selectionStart)
+        assertTrue(service.onCursorMove(-5))
+        sync()
+        assertEquals(0, edit.selectionStart)
+        // At the start: nothing moves, so nothing vibrates.
+        assertEquals(false, service.onCursorMove(-1))
+        assertTrue(service.onCursorMove(3))
+        sync()
+        assertEquals(false, service.onCursorMove(1))
+    }
+
+    @Test fun heldDeleteStopsWhenNothingIsLeft() {
+        type("ab")
+        assertTrue(service.onRepeatDelete()); sync()
+        assertTrue(service.onRepeatDelete()); sync()
+        assertEquals("", text)
+        assertEquals(false, service.onRepeatDelete())
+    }
+
+    @Test fun undoingAnAdaptiveKeyPickTeachesItToBackOff() {
+        val learning = service.logic.hitboxLearning
+        learning.reset()
+        assertEquals(1f, learning.damp('d', 's'), 0f)
+        type("ki")
+        // The finger was on "d", the adaptive keys typed "s"...
+        service.logic.onTapResolved('d', 's')
+        service.logic.onCharacter("s", 0f, 0f); sync()
+        // ...and the user took it back.
+        backspace()
+        assertTrue(learning.damp('d', 's') < 0.6f)
+        assertEquals(1f, learning.damp('f', 'd'), 0f)
+    }
+
+    @Test fun changingAnySettingWhileTypingNeverCrashes() {
+        val s = (org.robolectric.RuntimeEnvironment.getApplication() as SmartKeyboardApp).settings
+        type("hello ")
+        val keys = Settings::class.java.declaredFields
+            .filter { java.lang.reflect.Modifier.isStatic(it.modifiers) && it.type == String::class.java }
+            .mapNotNull { f -> f.isAccessible = true; f.get(null) as? String }
+        assertTrue(keys.size > 30)
+        for (open in listOf<() -> Unit>({}, { service.onToolbarAction(com.itzsuli.smartkeyboard.ime.SuggestionStripView.ToolbarAction.EMOJI) },
+            { service.onToolbarAction(com.itzsuli.smartkeyboard.ime.SuggestionStripView.ToolbarAction.CLIPBOARD) })) {
+            open(); idle()
+            for (k in keys) {
+                if (k == Settings.LANGUAGES || k == Settings.CURRENT_LANGUAGE || k == Settings.MIXED_LANGUAGES) continue
+                val old = s.prefs.all[k]
+                when (old) {
+                    is Boolean -> s.set(k, !old)
+                    is Int -> s.set(k, old + 1)
+                    else -> s.set(k, true)
+                }
+                idle()
+                s.prefs.edit().apply { if (old == null) remove(k) else when (old) { is Boolean -> putBoolean(k, old); is Int -> putInt(k, old); is String -> putString(k, old); else -> remove(k) } }.commit()
+                idle()
+            }
+            for (h in listOf(70, 140, 100)) { s.set(Settings.KEY_HEIGHT, h); idle() }
+            s.set(Settings.NUMBER_ROW, true); idle(); s.set(Settings.NUMBER_ROW, false); idle()
+        }
+        service.onKeyTap(com.itzsuli.smartkeyboard.ime.Key("ABC", KeyCode.ALPHABET), 0f, 0f)
+        idle()
+        layout()
+        type("ok ")
+        assertTrue(text, text.endsWith("ok "))
+    }
+
+    @Test fun emojiPanelStaysOpenWhileTypingEmoji() {
+        service.onToolbarAction(com.itzsuli.smartkeyboard.ime.SuggestionStripView.ToolbarAction.EMOJI)
+        idle()
+        fun panelOpen(v: View): Boolean = v is com.itzsuli.smartkeyboard.ime.EmojiPanel || (v is ViewGroup && (0 until v.childCount).any { panelOpen(v.getChildAt(it)) })
+        assertTrue(panelOpen(root))
+        // Picking an emoji saves the recents list in the shared settings file.
+        (org.robolectric.RuntimeEnvironment.getApplication() as SmartKeyboardApp).settings.prefs.edit().putString("emoji_recents", "😀").apply()
+        idle()
+        assertTrue(panelOpen(root))
+        // A new theme shows the keys in the new look.
+        (org.robolectric.RuntimeEnvironment.getApplication() as SmartKeyboardApp).settings.set(Settings.THEME, "neon")
+        idle()
+        assertEquals(false, panelOpen(root))
     }
 
     @Test fun learnsNewWordsAfterTwoUses() {
@@ -306,7 +461,7 @@ class KeyboardServiceTest {
         service.onToolbarAction(com.itzsuli.smartkeyboard.ime.SuggestionStripView.ToolbarAction.EMOJI)
         repeat(5) { idle(); Thread.sleep(30) }
         shot("emoji")
-        service.onKeyTap(com.itzsuli.smartkeyboard.ime.Key("ABC", KeyCode.ALPHABET), 0f, 0f)
+        service.onAiClose()
         repeat(3) { idle() }
         val s = (org.robolectric.RuntimeEnvironment.getApplication() as SmartKeyboardApp).settings
         for (t in listOf("dark", "sunset", "neon", "glass")) {
