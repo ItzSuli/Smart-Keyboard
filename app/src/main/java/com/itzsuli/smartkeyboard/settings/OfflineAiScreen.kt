@@ -18,6 +18,7 @@ import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -36,6 +37,7 @@ import androidx.compose.ui.unit.dp
 import com.google.mlkit.genai.common.FeatureStatus
 import com.itzsuli.smartkeyboard.SmartKeyboardApp
 import com.itzsuli.smartkeyboard.ai.GeminiNano
+import com.itzsuli.smartkeyboard.ai.LocalLlm
 import com.itzsuli.smartkeyboard.ai.OnDeviceProvider
 import com.itzsuli.smartkeyboard.ai.Prompts
 import com.itzsuli.smartkeyboard.data.AiTone
@@ -183,6 +185,28 @@ fun OfflineAiScreen(onBack: () -> Unit) {
                         }
                     }
                 }
+            }
+        }
+        item {
+            Group("Speed") {
+                val gpu by setting(Settings.OFFLINE_GPU) { it.offlineGpu }
+                fun switch(on: Boolean) {
+                    s.set(Settings.OFFLINE_GPU, on)
+                    // Takes effect the next time the model loads.
+                    LocalLlm.releaseAsync()
+                }
+                SettingRow(
+                    "Use the graphics chip",
+                    "Faster answers, but the phone can stutter for a moment when the model loads. Off: runs on the processor, smoothly.",
+                    trailing = { Switch(checked = gpu, onCheckedChange = { switch(it) }) },
+                    onClick = { switch(!gpu) },
+                )
+                tick // refreshed every second
+                Hint(when (LocalLlm.backendInUse) {
+                    "gpu" -> "Right now: loaded on the graphics chip."
+                    "cpu" -> "Right now: loaded on the processor."
+                    else -> "Right now: not loaded (it loads in the background when the keyboard opens)."
+                })
             }
         }
         item {

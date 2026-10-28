@@ -130,7 +130,9 @@ class KeyboardServiceTest {
 
     private fun type(text: String) {
         for (c in text) {
-            if (c == ' ') tap(key(" ")) else tap(key(c.lowercaseChar().toString()))
+            val k = if (c == ' ') key(" ") else keyboard.layout!!.keys.firstOrNull { it.label == c.lowercaseChar().toString() || it.text == c.lowercaseChar().toString() }
+            // Symbols that live on another page ("!", digits) come in like a long-press would.
+            if (k != null) tap(k) else { service.logic.onCharacter(c.toString()); sync() }
             Thread.sleep(5)
             idle()
         }
@@ -459,6 +461,47 @@ class KeyboardServiceTest {
         assertTrue(text, text.endsWith("skrrt skrrt skrrt "))
     }
 
+    @Test fun spaceComesByItselfAfterPunctuation() {
+        val app = org.robolectric.RuntimeEnvironment.getApplication() as SmartKeyboardApp
+        type("hey,you")
+        assertEquals("Hey, you", text)
+        // A space typed out of habit isn't doubled, and the next sentence starts with a capital.
+        type(". ")
+        assertEquals("Hey, you. ", text)
+        type("ok!cool")
+        assertEquals("Hey, you. Ok! Cool", text)
+        // "..." stays together.
+        type("...")
+        assertEquals("Hey, you. Ok! Cool... ", text)
+        // Numbers keep their dots and commas.
+        type("its 3.5,1,000")
+        assertTrue(text, text.endsWith(" 3.5,1,000"))
+        // Turned off, punctuation is just punctuation.
+        app.settings.set(Settings.SPACE_AFTER_PUNCT, false)
+        type(" ok,no")
+        assertTrue(text, text.endsWith(" ok,no"))
+        app.settings.set(Settings.SPACE_AFTER_PUNCT, null)
+    }
+
+    @Test fun holdingThePeriodOffersACommaFirst() {
+        val period = key(".")
+        assertEquals(listOf(",", "?", "!", "%"), period.popup.take(4))
+        assertTrue("…" !in period.popup)
+        // The comma is right under the finger, whatever the screen width.
+        val overlay = findOverlay(root)!!
+        val loc = IntArray(2).also { keyboard.getLocationInWindow(it) }
+        val oLoc = IntArray(2).also { overlay.getLocationInWindow(it) }
+        val dx = (loc[0] - oLoc[0]).toFloat(); val dy = (loc[1] - oLoc[1]).toFloat()
+        val r = android.graphics.RectF(period.bounds.left + dx, period.bounds.top + dy, period.bounds.right + dx, period.bounds.bottom + dy)
+        overlay.showPopup(period.popup, r)
+        overlay.selectPopupAt(r.centerX())
+        assertEquals(",", overlay.popupValue())
+        // Sliding left goes through the rest.
+        overlay.selectPopupAt(r.centerX() - r.width())
+        assertEquals("?", overlay.popupValue())
+        overlay.hidePopup()
+    }
+
     @Test fun fixingATypoAtASentenceStartSavesNothing() {
         val lex = (org.robolectric.RuntimeEnvironment.getApplication() as SmartKeyboardApp).languages.lexicon("en")
         // "whst" at the start of a sentence, fixed by tapping the keyboard's own idea, three times.
@@ -614,7 +657,11 @@ class KeyboardServiceTest {
         val e = key("e")
         overlay.showPopup(listOf("3", "é", "è", "ê", "ë", "ē"), android.graphics.RectF(e.bounds.left + loc[0] - oLoc[0], e.bounds.top + loc[1] - oLoc[1],
             e.bounds.right + loc[0] - oLoc[0], e.bounds.bottom + loc[1] - oLoc[1]))
+        // The finger starts on the key (the digit is picked), then slides one key right: "é".
+        overlay.selectPopupAt(e.bounds.centerX() + loc[0] - oLoc[0])
+        assertEquals("3", overlay.popupValue())
         overlay.selectPopupAt(e.bounds.centerX() + e.bounds.width() + loc[0] - oLoc[0])
+        assertEquals("é", overlay.popupValue())
         shot("accents")
         overlay.hidePopup()
         Thread.sleep(400)

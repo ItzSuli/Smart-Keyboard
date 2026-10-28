@@ -107,9 +107,11 @@ object Layouts {
         if (o.languageKey) keys.add(Key("🌐", KeyCode.LANGUAGE, type = Key.Type.FUNCTION))
         val fixed = keys.sumOf { it.width.toDouble() }.toFloat() + 1f + 1.5f
         keys.add(Key(o.spaceLabel ?: Languages.get(lang).nativeName, KeyCode.SPACE, text = " ", width = units - fixed, type = Key.Type.SPACE))
-        val period = Key(".", popup = if (lang == "ar") listOf("؟", "!", "،", "؛", "?", "…", "-", "@", "#")
-        else if (lang == "es") listOf("?", "!", "¿", "¡", "…", "-", "@", "#", "&", "%", "/")
-        else listOf("?", "!", "…", "-", "@", "#", "&", "%", "/", "*", "+"), type = Key.Type.FUNCTION)
+        // Hold the period: a comma first (right under the finger), then what's used most.
+        // At most 8, so they fit between the key and the left edge.
+        val period = Key(".", popup = if (lang == "ar") listOf("،", "؟", "!", "؛", "?", "%", "-", "@")
+        else if (lang == "es") listOf(",", "?", "!", "¿", "¡", "%", "-", "@")
+        else listOf(",", "?", "!", "%", "-", "/", "@", "#"), type = Key.Type.FUNCTION)
         keys.add(period)
         keys.add(Key(o.enterLabel, KeyCode.ENTER, width = 1.5f, type = Key.Type.ACTION))
         return Row(keys)

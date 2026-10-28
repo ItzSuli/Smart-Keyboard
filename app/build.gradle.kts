@@ -18,8 +18,8 @@ android {
         applicationId = "com.itzsuli.smartkeyboard"
         minSdk = 26
         targetSdk = 35
-        versionCode = 6
-        versionName = "1.4.0"
+        versionCode = 7
+        versionName = "1.4.1"
     }
 
     signingConfigs {

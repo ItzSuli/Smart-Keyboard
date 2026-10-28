@@ -17,6 +17,8 @@ import com.google.mlkit.genai.prompt.SystemInstruction
 import com.google.mlkit.genai.prompt.TextPart
 import com.google.mlkit.genai.prompt.generateContentRequest
 import com.google.mlkit.genai.prompt.java.GenerativeModelFutures
+import com.itzsuli.smartkeyboard.BuildConfig
+import com.itzsuli.smartkeyboard.SmartKeyboardApp
 import com.itzsuli.smartkeyboard.data.OfflineModel
 import com.itzsuli.smartkeyboard.data.OfflineModelStore
 import com.itzsuli.smartkeyboard.engine.AiOutputCheck
@@ -63,7 +65,16 @@ object LocalLlm {
     /** One loaded model. Replaced in tests, where native code can't run. */
     interface Runner : AutoCloseable {
         fun generate(system: String, user: String, maxTokens: Int): String
+        /** "cpu" or "gpu": what the model runs on. */
+        val backend: String get() = "cpu"
     }
+
+    /**
+     * Thread priority for loading and running the model: below normal apps but not in Android's
+     * background group (which would pin it to the slow cores), so the phone's own drawing and
+     * typing always come first.
+     */
+    const val WORK_PRIORITY = 5
 
     var factory: (Context, OfflineModel) -> Runner = { ctx, model -> LiteRtRunner(ctx, model) }
 
@@ -73,7 +84,7 @@ object LocalLlm {
     private val janitor = Executors.newSingleThreadScheduledExecutor { r -> Thread(r, "local-llm-release").apply { isDaemon = true } }
     /** Loads models at low priority so the keyboard's drawing and typing come first. */
     private val loader = Executors.newSingleThreadExecutor { r ->
-        Thread({ android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_BACKGROUND); r.run() }, "local-llm-load").apply { isDaemon = true }
+        Thread({ android.os.Process.setThreadPriority(WORK_PRIORITY); r.run() }, "local-llm-load").apply { isDaemon = true }
     }
     private var release: ScheduledFuture<*>? = null
 
@@ -110,7 +121,7 @@ object LocalLlm {
         runner?.close()
         runner = null
         loaded = null
-        return factory(context.applicationContext, model).also { runner = it; loaded = model }
+        return factory(context.applicationContext, model).also { runner = it; loaded = model; backendInUse = it.backend }
     }
 
     @Synchronized
@@ -119,10 +130,15 @@ object LocalLlm {
         runCatching { runner?.close() }
         runner = null
         loaded = null
+        backendInUse = null
     }
 
     /** Never waits, even while a model is loading. */
     val isLoaded: Boolean get() = loaded != null
+
+    /** "cpu" or "gpu" while a model is loaded, else null (shown in Offline AI settings). */
+    @Volatile var backendInUse: String? = null
+        private set
 
     /** Lets the model go without waiting for a request or a load that's running. */
     fun releaseAsync() { janitor.execute { release() } }
@@ -142,33 +158,47 @@ object LocalLlm {
 
 private class LiteRtRunner(context: Context, private val model: OfflineModel) : LocalLlm.Runner {
     private val engine: Engine
+    override val backend: String
 
     init {
-        val path = OfflineModelStore(context).file(model).absolutePath
+        val store = OfflineModelStore(context)
+        val path = store.file(model).absolutePath
         val prefs = context.getSharedPreferences("offline_models", Context.MODE_PRIVATE)
         val brokenKey = "broken_backend_" + model.id
+        // The processor by default: starting a 2 GB model on the graphics chip makes the whole
+        // phone stutter for a moment. The graphics chip answers faster and is one switch away.
+        val gpuFirst = SmartKeyboardApp.of(context).settings.offlineGpu
         // A backend that failed the test last time is skipped (only one is ever marked).
         val broken = prefs.getString(brokenKey, null)
-        val backends = (if (model.preferGpu) listOf("gpu", "cpu") else listOf("cpu", "gpu")).filter { it != broken }
+        val backends = (if (gpuFirst) listOf("gpu", "cpu") else listOf("cpu", "gpu")).filter { it != broken }
+        // Half the cores at most: the other half stay free for the phone itself.
+        val threads = (Runtime.getRuntime().availableProcessors() / 2).coerceIn(2, 4)
         var started: Engine? = null
+        var startedOn = "cpu"
         var error: String? = null
         for (name in backends) {
             var e: Engine? = null
             try {
-                e = Engine(EngineConfig(modelPath = path, backend = if (name == "gpu") Backend.GPU() else Backend.CPU(),
-                    maxNumTokens = MAX_TOKENS, cacheDir = context.cacheDir.absolutePath))
+                e = Engine(EngineConfig(modelPath = path, backend = if (name == "gpu") Backend.GPU() else Backend.CPU(threadCount = threads),
+                    maxNumTokens = MAX_TOKENS, cacheDir = store.cacheDir(model).absolutePath))
                 e.initialize()
                 // Some phones run a model on the GPU but get garbage out of it (wrong alphabets,
-                // random symbols). A tiny test answer catches that before it reaches any text.
-                val answer = LocalLlm.stripThinking(ask(e, CANARY_SYSTEM, CANARY_TEXT, 48))
-                val problem = AiOutputCheck.problem(CANARY_TEXT, answer, AiOutputCheck.Kind.REWRITE, listOf("de", "en"))
-                if (problem != null) {
-                    prefs.edit().putString(brokenKey, name).apply()
-                    error = "the ${name.uppercase()} gave a broken test answer ($problem)"
-                    e.close()
-                    continue
+                // random symbols). A tiny test answer catches that before it reaches any text;
+                // once a backend passed, it isn't tested again until the app is updated.
+                val passedKey = "passed_${model.id}_$name"
+                if (prefs.getInt(passedKey, 0) != BuildConfig.VERSION_CODE) {
+                    val answer = LocalLlm.stripThinking(ask(e, CANARY_SYSTEM, CANARY_TEXT, 48))
+                    val problem = AiOutputCheck.problem(CANARY_TEXT, answer, AiOutputCheck.Kind.REWRITE, listOf("de", "en"))
+                    if (problem != null) {
+                        prefs.edit().putString(brokenKey, name).apply()
+                        error = "the ${name.uppercase()} gave a broken test answer ($problem)"
+                        e.close()
+                        continue
+                    }
+                    prefs.edit().putInt(passedKey, BuildConfig.VERSION_CODE).apply()
                 }
                 started = e
+                startedOn = name
                 break
             } catch (t: Throwable) {
                 runCatching { e?.close() }
@@ -176,6 +206,7 @@ private class LiteRtRunner(context: Context, private val model: OfflineModel) : 
             }
         }
         engine = started ?: throw AiException("${model.label} doesn't work on this phone: ${error ?: "unknown error"}. Try another model.")
+        backend = startedOn
     }
 
     override fun generate(system: String, user: String, maxTokens: Int): String = ask(engine, system, user, maxTokens)

@@ -19,28 +19,26 @@ enum class OfflineModel(
     val fileName: String,
     val sizeBytes: Long,
     val sha256: String,
-    /** Try the GPU first (otherwise the CPU first). */
-    val preferGpu: Boolean,
     /** Qwen 3 thinks out loud unless asked not to. */
     val noThinkHint: Boolean = false,
 ) {
     GEMMA4_E2B(
         "gemma4-e2b", "Gemma 4 E2B",
-        "Google's on-device model: the best quality in English, German, Arabic and 140+ languages. Uses the graphics chip on flagships like the Galaxy S24 and newer, the processor elsewhere.",
+        "Google's on-device model: the best quality in English, German, Arabic and 140+ languages. Quickest on flagships like the Galaxy S24 and newer.",
         "litert-community/gemma-4-E2B-it-litert-lm", "gemma-4-E2B-it.litertlm", 2_588_147_712L,
-        "181938105e0eefd105961417e8da75903eacda102c4fce9ce90f50b97139a63c", preferGpu = true,
+        "181938105e0eefd105961417e8da75903eacda102c4fce9ce90f50b97139a63c",
     ),
     QWEN3_1_7B(
         "qwen3-1.7b", "Qwen 3 1.7B",
         "Fast and multilingual (Arabic too), half the size of Gemma.",
         "litert-community/Qwen3-1.7B", "Qwen3-1.7B_dynamic_wi4b32_afp32.litertlm", 977_184_032L,
-        "2a72330b504a6596d53a2c00923c57173b10f1b83e6a541213ffec08d1fc5de8", preferGpu = false, noThinkHint = true,
+        "2a72330b504a6596d53a2c00923c57173b10f1b83e6a541213ffec08d1fc5de8", noThinkHint = true,
     ),
     QWEN3_0_6B(
         "qwen3-0.6b", "Qwen 3 0.6B",
         "The smallest and quickest. Fine for typos, weaker at rewriting.",
         "litert-community/Qwen3-0.6B", "Qwen3-0.6B_dynamic_wi4b32_afp32.litertlm", 344_671_744L,
-        "03e7da1eb1108b50dffaa9bb52cc7bcbad2eb0c66ca990267f480c1e545d2856", preferGpu = false, noThinkHint = true,
+        "03e7da1eb1108b50dffaa9bb52cc7bcbad2eb0c66ca990267f480c1e545d2856", noThinkHint = true,
     );
 
     val url: String get() = "https://huggingface.co/$repo/resolve/main/$fileName"
@@ -76,10 +74,15 @@ class OfflineModelStore(private val context: Context) {
 
     fun installed(): List<OfflineModel> = OfflineModel.entries.filter { isInstalled(it) }
 
+    /** What the AI runtime prepares for [model] on the first load, so later loads are quick and light. */
+    fun cacheDir(model: OfflineModel) = File(dir, "cache/${model.id}").apply { mkdirs() }
+
     fun delete(model: OfflineModel) {
         cancelDownload(model)
         file(model).delete()
-        prefs.edit().remove("verified_" + model.id).remove("broken_backend_" + model.id).apply()
+        File(dir, "cache/${model.id}").deleteRecursively()
+        prefs.edit().remove("verified_" + model.id).remove("broken_backend_" + model.id)
+            .remove("passed_${model.id}_cpu").remove("passed_${model.id}_gpu").apply()
     }
 
     /** Frees the space taken by model files older versions downloaded that no longer work. */

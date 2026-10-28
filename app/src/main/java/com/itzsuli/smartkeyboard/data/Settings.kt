@@ -99,6 +99,8 @@ class Settings(context: Context) {
     // ---- typing ----
     val autoCapitalize get() = bool(AUTO_CAP, true)
     val doubleSpacePeriod get() = bool(DOUBLE_SPACE, true)
+    /** A space goes in by itself after . , ! and ? (not inside numbers, links or e-mail addresses). */
+    val spaceAfterPunctuation get() = bool(SPACE_AFTER_PUNCT, true)
     val autoCorrectMode get() = enumValueOrDefault(str(AUTOCORRECT, AutoCorrectMode.CHILL.name), AutoCorrectMode.CHILL)
     val fixCapitalization get() = bool(FIX_CAPS, true)
     val showSuggestions get() = bool(SUGGESTIONS, true)
@@ -167,6 +169,8 @@ class Settings(context: Context) {
         (aiProvider == "ondevice" && offlineEngine.isNotBlank()))
     /** Offline AI: "nano" (Gemini Nano) or the id of a downloaded model. */
     val offlineEngine get() = OfflineModel.current(str(OFFLINE_ENGINE, ""))
+    /** Run the offline model on the graphics chip (faster answers, a short stutter when it loads). */
+    val offlineGpu get() = bool(OFFLINE_GPU, false)
     /** Use the offline AI when the cloud provider can't be reached. */
     val offlineFallback get() = bool(OFFLINE_FALLBACK, true)
     /** Default proofreading tone (and the tone everywhere when per-app tones are off). */
@@ -240,6 +244,7 @@ class Settings(context: Context) {
         const val LONG_PRESS = "long_press"
         const val AUTO_CAP = "auto_cap"
         const val DOUBLE_SPACE = "double_space"
+        const val SPACE_AFTER_PUNCT = "space_after_punct"
         const val AUTOCORRECT = "autocorrect"
         const val FIX_CAPS = "fix_caps"
         const val SUGGESTIONS = "suggestions"
@@ -277,6 +282,7 @@ class Settings(context: Context) {
         const val AI_TONE = "ai_tone"
         const val OFFLINE_ENGINE = "ai_offline_engine"
         const val OFFLINE_FALLBACK = "ai_offline_fallback"
+        const val OFFLINE_GPU = "ai_offline_gpu"
         const val TONE_PER_APP = "tone_per_app"
         const val TONE_APPS = "tone_apps"
         const val SEEN_APPS = "seen_apps"

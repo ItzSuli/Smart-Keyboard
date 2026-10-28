@@ -120,7 +120,10 @@ class InputLogic(private val service: SmartKeyboardService) {
     private var lastCorrection: LastCorrection? = null
     /** A word brought back by undoing a correction: the next space keeps it exactly as typed. */
     private var keepAsTyped: String? = null
+    /** The space before the cursor was put there by the keyboard (after a suggestion or punctuation). */
     private var autoSpaced = false
+    /** Links, e-mail addresses: no automatic space after punctuation. */
+    private var isWebOrEmail = false
     private var lastSpaceAt = 0L
     private var deleteSelectionAnchor = -1
 
@@ -151,6 +154,7 @@ class InputLogic(private val service: SmartKeyboardService) {
         val webOrEmail = cls == InputType.TYPE_CLASS_TEXT && variation in setOf(
             InputType.TYPE_TEXT_VARIATION_URI, InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS, InputType.TYPE_TEXT_VARIATION_WEB_EMAIL_ADDRESS,
         )
+        isWebOrEmail = webOrEmail
         val noPersonalLearning = info.imeOptions and EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING != 0
         allowSuggestions = cls == InputType.TYPE_CLASS_TEXT && !isPassword && settings.showSuggestions &&
             (flags and InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS == 0 || variation == InputType.TYPE_TEXT_VARIATION_FILTER)
@@ -310,6 +314,8 @@ class InputLogic(private val service: SmartKeyboardService) {
             if (cursor < 0) cursor = newSelStart
             return
         }
+        // The same spot reported again (nothing moved, e.g. after a space that wasn't doubled).
+        if (newSelStart == newSelEnd && newSelStart == cursor && composing.isEmpty() && candidatesStart < 0) return
         if (composing.isNotEmpty() && candidatesStart >= 0 && newSelStart == newSelEnd && candidatesEnd == newSelEnd &&
             candidatesEnd - candidatesStart == composing.length) {
             // The editor agrees with our composing word: nothing changed behind our back.
@@ -399,6 +405,7 @@ class InputLogic(private val service: SmartKeyboardService) {
             val corrected = if (composing.isNotEmpty()) commitComposing(autocorrect = corrects, separator = "") else null
             val beforeSeparator = cursor
             val now = SystemClock.uptimeMillis()
+            var swallowed = false
             when {
                 // "word ␣␣" → "word. "
                 c == ' ' && settings.doubleSpacePeriod && now - lastSpaceAt < DOUBLE_SPACE_MS && canDoubleSpacePeriod() -> {
@@ -408,12 +415,26 @@ class InputLogic(private val service: SmartKeyboardService) {
                     autoSpaced = false
                     sentenceEnded()
                 }
+                // The keyboard already put a space there: a space typed by habit isn't doubled
+                // (and still counts as the first space of a double-space full stop).
+                autoSpaced && c == ' ' && textBefore(1) == " " -> {
+                    autoSpaced = false
+                    lastSpaceAt = now
+                    swallowed = true
+                }
                 // "word␣" + "." → "word. " (the automatic space moves behind the punctuation)
                 autoSpaced && text.length == 1 && c in ".,!?;:)…،؟" && textBefore(1) == " " -> {
                     deleteBefore(1)
                     commit(if (c == ')') ") " else "$c ")
                     autoSpaced = true
                     if (c in ".!?…؟") sentenceEnded()
+                }
+                // "word" + "," → "word, "
+                text.length == 1 && c in AUTO_SPACE_AFTER && wantsSpaceAfterPunctuation() -> {
+                    commit("$c ")
+                    autoSpaced = true
+                    lastSpaceAt = 0
+                    if (c in ".!?؟") sentenceEnded()
                 }
                 else -> {
                     commit(text)
@@ -427,12 +448,24 @@ class InputLogic(private val service: SmartKeyboardService) {
                 corrected.separator = textBefore(cursor - beforeSeparator).toString()
                 lastCorrection = corrected
             }
-            if (c == ' ' || c == '\n') maybeProofreadLastSentence()
+            if ((c == ' ' && !swallowed) || c == '\n') maybeProofreadLastSentence()
         } finally {
             conn.endBatchEdit()
         }
         service.afterSeparator()
         refreshSuggestions()
+    }
+
+    /**
+     * Whether punctuation typed now gets a space after it: in ordinary text after a word, but not
+     * in numbers (3.5, 1,000), links or e-mail addresses, or in front of text that follows.
+     */
+    private fun wantsSpaceAfterPunctuation(): Boolean {
+        if (!settings.spaceAfterPunctuation || !allowSuggestions || isWebOrEmail) return false
+        val before = textBefore(1)
+        if (before.isEmpty() || before[0].isDigit() || before[0].isWhitespace()) return false
+        val after = ic?.getTextAfterCursor(1, 0)?.toString().orEmpty()
+        return after.isEmpty() || after[0] == '\n'
     }
 
     private fun canDoubleSpacePeriod(): Boolean {
@@ -1225,6 +1258,8 @@ class InputLogic(private val service: SmartKeyboardService) {
     }
 
     companion object {
+        /** Punctuation that gets a space after it by itself. */
+        private const val AUTO_SPACE_AFTER = ".,!?،؟"
         private const val DOUBLE_SPACE_MS = 600L
         /** "Language" of a correction made by Arabizi (undo is remembered by the keyboard's own language). */
         private const val ARABIZI = -2

@@ -62,21 +62,39 @@ class KeyboardOverlay(context: Context) : View(context) {
     var popupSelected = -1
         private set
 
+    /** Where the finger was when the popup opened, and the option picked there. */
+    private var popupAnchorX = Float.NaN
+    private var popupFirst = 0
+
+    /**
+     * Shows [options] above the key. The first option sits right above the finger and is picked
+     * if the finger doesn't move; the others go toward the middle of the keyboard, where there's
+     * room (to the left for keys on the right half).
+     */
     fun showPopup(options: List<String>, keyRect: RectF) {
-        popupOptions = options
         popupCell = max(keyRect.width(), 38 * density)
         val w = popupCell * options.size
         val h = keyRect.height() * 1.05f
-        val left = (keyRect.centerX() - popupCell / 2).coerceIn(4 * density, max(4 * density, width - w - 4 * density))
+        val leftward = options.size > 1 && keyRect.centerX() > width / 2f
+        popupOptions = if (leftward) options.reversed() else options
+        popupFirst = if (leftward) options.size - 1 else 0
+        val firstLeft = keyRect.centerX() - popupCell / 2
+        val left = (firstLeft - popupCell * popupFirst).coerceIn(4 * density, max(4 * density, width - w - 4 * density))
         popupRect.set(left, keyRect.top - h - 6 * density, left + w, keyRect.top - 6 * density)
-        popupSelected = 0
+        popupSelected = popupFirst
+        popupAnchorX = Float.NaN
         invalidate()
     }
 
-    /** Updates the highlighted option for a finger at overlay x; returns the index. */
+    /**
+     * Updates the highlighted option for a finger at overlay x; returns the index. The first call
+     * after [showPopup] marks where the finger is: from there, each key-width of sliding moves one
+     * option, so the first option is always the one picked without moving.
+     */
     fun selectPopupAt(x: Float): Int {
         if (popupOptions.isEmpty()) return -1
-        val i = ((x - popupRect.left) / popupCell).toInt().coerceIn(0, popupOptions.size - 1)
+        if (popupAnchorX.isNaN()) popupAnchorX = x
+        val i = (popupFirst + Math.round((x - popupAnchorX) / popupCell)).coerceIn(0, popupOptions.size - 1)
         if (i != popupSelected) {
             popupSelected = i
             invalidate()

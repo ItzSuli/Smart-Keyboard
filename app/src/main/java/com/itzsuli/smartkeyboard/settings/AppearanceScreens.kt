@@ -269,6 +269,7 @@ fun TypingScreen(onBack: () -> Unit, open: (String) -> Unit = {}) {
                 ) { s.set(Settings.AUTOCORRECT, it) }
                 SwitchSetting(Settings.FIX_CAPS, "Fix capitalisation", "“i” → “I”, names, and German nouns") { it.fixCapitalization }
                 SwitchSetting(Settings.AUTO_CAP, "Capitalise sentences") { it.autoCapitalize }
+                SwitchSetting(Settings.SPACE_AFTER_PUNCT, "Space after . , ! ?", "Adds the space for you; not inside numbers like 3.5 or 1,000") { it.spaceAfterPunctuation }
                 SwitchSetting(Settings.DOUBLE_SPACE, "Double-space for full stop") { it.doubleSpacePeriod }
             }
         }

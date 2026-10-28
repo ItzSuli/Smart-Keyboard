@@ -67,11 +67,15 @@ class OfflineAiTest {
         assertEquals("I don't know what you mean lol", fixed)
         assertTrue(prompts.last(), prompts.last().contains("Keep it chill") && prompts.last().endsWith(model.id))
         assertTrue(LocalLlm.isLoaded)
+        assertEquals("cpu", LocalLlm.backendInUse)
         // Memory pressure lets the model go.
         app.onTrimMemory(android.content.ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW)
         val end = System.currentTimeMillis() + 5_000
         while (LocalLlm.isLoaded && System.currentTimeMillis() < end) Thread.sleep(10)
         assertFalse(LocalLlm.isLoaded)
+        assertEquals(null, LocalLlm.backendInUse)
+        // The processor is the default: no stutter when the model loads.
+        assertFalse(app.settings.offlineGpu)
     }
 
     @Test fun gibberishNeverReachesTheText() {

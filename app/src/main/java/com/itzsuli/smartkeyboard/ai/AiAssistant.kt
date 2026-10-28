@@ -21,7 +21,10 @@ import java.util.concurrent.atomic.AtomicInteger
  * the user accepts teach the on-device autocorrect.
  */
 class AiAssistant(private val context: Context, private val settings: Settings) {
-    private val executor = Executors.newFixedThreadPool(2) { r -> Thread(r, "ai").apply { isDaemon = true } }
+    // Below the phone's own work: an offline model computes for seconds on these threads.
+    private val executor = Executors.newFixedThreadPool(2) { r ->
+        Thread({ android.os.Process.setThreadPriority(LocalLlm.WORK_PRIORITY); r.run() }, "ai").apply { isDaemon = true }
+    }
     private val main = Handler(Looper.getMainLooper())
     private val predictionGeneration = AtomicInteger()
     private val predictionCache = object : LinkedHashMap<String, List<String>>(64, 0.75f, true) {
