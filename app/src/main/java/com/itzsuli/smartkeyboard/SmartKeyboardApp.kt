@@ -1,0 +1,39 @@
+package com.itzsuli.smartkeyboard
+
+import android.app.Application
+import android.content.Context
+import com.itzsuli.smartkeyboard.ai.AiAssistant
+import com.itzsuli.smartkeyboard.data.ClipboardHistory
+import com.itzsuli.smartkeyboard.data.EmojiRecents
+import com.itzsuli.smartkeyboard.data.LanguageManager
+import com.itzsuli.smartkeyboard.data.LearningStore
+import com.itzsuli.smartkeyboard.data.Settings
+import com.itzsuli.smartkeyboard.data.Shortcuts
+import com.itzsuli.smartkeyboard.data.SyncManager
+
+/** Process-wide singletons shared by the keyboard service and the settings app. */
+class SmartKeyboardApp : Application() {
+    val settings by lazy { Settings(this) }
+    val store by lazy { LearningStore(this) }
+    val languages by lazy { LanguageManager(this, store) }
+    val ai by lazy { AiAssistant(this, settings) }
+    val clipboard by lazy { ClipboardHistory(this) }
+    val shortcuts by lazy { Shortcuts(store) }
+    val emojiRecents by lazy { EmojiRecents(settings) }
+    val sync by lazy { SyncManager(this, settings) }
+
+    override fun onCreate() {
+        super.onCreate()
+        Thread({ runCatching { com.itzsuli.smartkeyboard.data.OfflineModelStore(this).removeObsolete() } }, "cleanup").start()
+    }
+
+    override fun onTrimMemory(level: Int) {
+        super.onTrimMemory(level)
+        // An offline AI model holds a lot of memory: give it back when the phone needs it.
+        if (level >= TRIM_MEMORY_RUNNING_LOW) com.itzsuli.smartkeyboard.ai.LocalLlm.releaseAsync()
+    }
+
+    companion object {
+        fun of(context: Context): SmartKeyboardApp = context.applicationContext as SmartKeyboardApp
+    }
+}

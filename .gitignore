@@ -1,0 +1,21 @@
+*.iml
+.gradle/
+.kotlin/
+/local.properties
+/.idea/
+.DS_Store
+/build/
+/captures
+.externalNativeBuild
+.cxx
+app/build/
+engine/build/
+tools/.cache/
+__pycache__/
+*.pyc
+
+# Signing keys never belong in the repo
+*.jks
+*.keystore
+signing/
+*.p12

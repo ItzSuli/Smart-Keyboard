@@ -1,0 +1,724 @@
+package com.itzsuli.smartkeyboard
+
+import android.app.Activity
+import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.text.InputType
+import android.view.View
+import android.view.ViewGroup
+import android.view.inputmethod.BaseInputConnection
+import android.view.inputmethod.EditorInfo
+import android.view.inputmethod.InputConnection
+import android.widget.EditText
+import android.widget.FrameLayout
+import com.itzsuli.smartkeyboard.data.Settings
+import com.itzsuli.smartkeyboard.ime.Key
+import com.itzsuli.smartkeyboard.ime.KeyCode
+import com.itzsuli.smartkeyboard.ime.KeyboardView
+import com.itzsuli.smartkeyboard.ime.SmartKeyboardService
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
+import org.junit.Before
+import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.Robolectric
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.Shadows.shadowOf
+import org.robolectric.annotation.Config
+import org.robolectric.annotation.GraphicsMode
+import android.os.Looper
+import java.io.File
+
+/** Drives the real keyboard service against a real EditText, the way Android would. */
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk = [34], qualifiers = "w411dp-h891dp-xxhdpi")
+@GraphicsMode(GraphicsMode.Mode.NATIVE)
+class KeyboardServiceTest {
+
+    class TestService : SmartKeyboardService() {
+        var testIc: InputConnection? = null
+        var testInfo: EditorInfo? = null
+        override fun getCurrentInputConnection(): InputConnection? = testIc
+        override fun getCurrentInputEditorInfo(): EditorInfo? = testInfo
+    }
+
+    private lateinit var service: TestService
+    private lateinit var edit: EditText
+    private lateinit var keyboard: KeyboardView
+    private lateinit var root: View
+    private lateinit var activity: Activity
+
+    @Before
+    fun setUp() {
+        val app = org.robolectric.RuntimeEnvironment.getApplication() as SmartKeyboardApp
+        app.settings.set(Settings.LANGUAGES, "en,de,ar")
+        app.settings.set(Settings.CURRENT_LANGUAGE, "en")
+        app.settings.set(Settings.ONBOARDING_DONE, true)
+        app.settings.set(Settings.MIXED_LANGUAGES, null)
+        activity = Robolectric.buildActivity(Activity::class.java).setup().get()
+        edit = EditText(activity)
+        val container = FrameLayout(activity)
+        container.addView(edit, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 200))
+        service = Robolectric.buildService(TestService::class.java).create().get()
+        root = service.onCreateInputView()
+        container.addView(root, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, android.view.Gravity.BOTTOM))
+        activity.setContentView(container)
+        keyboard = find(root)!!
+        startInput(InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_CAP_SENTENCES)
+    }
+
+    private fun findOverlay(v: View): com.itzsuli.smartkeyboard.ime.KeyboardOverlay? {
+        if (v is com.itzsuli.smartkeyboard.ime.KeyboardOverlay) return v
+        if (v is ViewGroup) for (i in 0 until v.childCount) findOverlay(v.getChildAt(i))?.let { return it }
+        return null
+    }
+
+    private fun find(v: View): KeyboardView? {
+        if (v is KeyboardView) return v
+        if (v is ViewGroup) for (i in 0 until v.childCount) find(v.getChildAt(i))?.let { return it }
+        return null
+    }
+
+    private fun startInput(type: Int) {
+        edit.inputType = type
+        val info = EditorInfo().apply { inputType = type; imeOptions = EditorInfo.IME_ACTION_SEND; initialSelStart = edit.selectionStart; initialSelEnd = edit.selectionEnd }
+        val ic = edit.onCreateInputConnection(info)
+        service.testIc = ic
+        service.testInfo = info
+        service.onStartInput(info, false)
+        service.onStartInputView(info, false)
+        layout()
+        waitUntil { service.logic.isReady }
+    }
+
+    private fun layout() {
+        root.measure(View.MeasureSpec.makeMeasureSpec(1233, View.MeasureSpec.EXACTLY), View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED))
+        root.layout(0, 0, root.measuredWidth, root.measuredHeight)
+        idle()
+    }
+
+    private fun idle() = shadowOf(Looper.getMainLooper()).idle()
+
+    private fun waitUntil(timeoutMs: Long = 30_000, cond: () -> Boolean) {
+        val end = System.currentTimeMillis() + timeoutMs
+        while (!cond()) {
+            idle()
+            if (System.currentTimeMillis() > end) error("timed out")
+            Thread.sleep(20)
+        }
+        idle()
+    }
+
+    /** Tells the service about the editor's selection, as the framework does after edits. */
+    private fun sync() {
+        val text = edit.text
+        service.onUpdateSelection(0, 0, edit.selectionStart, edit.selectionEnd,
+            BaseInputConnection.getComposingSpanStart(text), BaseInputConnection.getComposingSpanEnd(text))
+        Thread.sleep(30)
+        idle()
+    }
+
+    private fun key(label: String): Key = keyboard.layout!!.keys.first { it.label == label || it.text == label }
+
+    private fun tap(k: Key) {
+        when (k.code) {
+            KeyCode.DELETE -> service.onDelete()
+            else -> service.onKeyTap(k, k.bounds.centerX(), k.bounds.centerY())
+        }
+        sync()
+    }
+
+    private fun type(text: String) {
+        for (c in text) {
+            val k = if (c == ' ') key(" ") else keyboard.layout!!.keys.firstOrNull { it.label == c.lowercaseChar().toString() || it.text == c.lowercaseChar().toString() }
+            // Symbols that live on another page ("!", digits) come in like a long-press would.
+            if (k != null) tap(k) else { service.logic.onCharacter(c.toString()); sync() }
+            Thread.sleep(5)
+            idle()
+        }
+    }
+
+    private fun backspace() = tap(keyboard.layout!!.keys.first { it.code == KeyCode.DELETE })
+
+    private val text get() = edit.text.toString()
+
+    @Test fun typesAndAutocorrects() {
+        type("i think teh ")
+        assertEquals("I think the ", text)
+    }
+
+    @Test fun backspaceUndoesAutocorrectAndRemembers() {
+        type("teh ")
+        assertEquals("The ", text)
+        backspace()
+        assertEquals("Teh", text)
+        type(" ")
+        assertEquals("Teh ", text)
+        type("teh ")
+        assertEquals("Teh teh ", text) // remembered: not corrected again
+    }
+
+    @Test fun keepsSlangAndSwears() {
+        type("lol idk wtf bruh thats so fucking funny ")
+        assertEquals("Lol idk wtf bruh that's so fucking funny ", text)
+    }
+
+    @Test fun doubleSpaceAddsPeriodAndCapitalises() {
+        type("hey  ")
+        assertEquals("Hey. ", text)
+        assertEquals(KeyboardView.ShiftState.ON, service.shiftState)
+    }
+
+    @Test fun punctuationReplacesAutoSpaceAfterSuggestion() {
+        type("hel")
+        waitUntil { true }
+        service.logic.onSuggestionPicked(com.itzsuli.smartkeyboard.engine.Suggestion("Hello", com.itzsuli.smartkeyboard.engine.Suggestion.Kind.COMPLETION))
+        sync()
+        assertEquals("Hello ", text)
+        tap(key("."))
+        assertEquals("Hello. ", text)
+    }
+
+    private fun swipe(word: String) {
+        val before = text
+        val xs = ArrayList<Float>()
+        val ys = ArrayList<Float>()
+        var px = Float.NaN
+        var py = Float.NaN
+        for (c in word) {
+            val k = key(c.toString())
+            val x = k.bounds.centerX()
+            val y = k.bounds.centerY()
+            if (!px.isNaN()) for (s in 1..12) { xs.add(px + (x - px) * s / 12f); ys.add(py + (y - py) * s / 12f) } else { xs.add(x); ys.add(y) }
+            px = x; py = y
+        }
+        service.onSwipeEnd(xs.toFloatArray(), ys.toFloatArray(), xs.size)
+        waitUntil { text != before && text.lowercase().endsWith(word.takeLast(2)) }
+        sync()
+    }
+
+    @Test fun swipeTypesWords() {
+        swipe("hello")
+        swipe("world")
+        type(" ")
+        assertEquals("Hello world ", text)
+    }
+
+    @Test fun tappedLetterAfterSwipeStartsANewWord() {
+        swipe("hello")
+        type("i ")
+        assertEquals("Hello I ", text)
+    }
+
+    @Test fun oneBackspaceDeletesTheSwipedWord() {
+        swipe("hello")
+        swipe("world")
+        backspace()
+        assertEquals("Hello ", text)
+        swipe("again")
+        assertEquals("Hello again", text)
+        // Typed (not swiped) words still lose one letter at a time.
+        type(" you")
+        backspace()
+        assertEquals("Hello again yo", text)
+    }
+
+    @Test fun oneBackspaceDeletesOneLetterWhenTurnedOff() {
+        (org.robolectric.RuntimeEnvironment.getApplication() as SmartKeyboardApp).settings.set(Settings.DELETE_SWIPED_WORD, false)
+        idle()
+        swipe("hello")
+        backspace()
+        assertEquals("Hell", text)
+    }
+
+    /** Starts a chat-like field and records the editor actions the keyboard performs. */
+    private fun startChat(inputType: Int, imeOptions: Int, actions: MutableList<Int>) {
+        edit.inputType = inputType
+        val created = EditorInfo()
+        val ic = object : android.view.inputmethod.InputConnectionWrapper(edit.onCreateInputConnection(created), false) {
+            override fun performEditorAction(editorAction: Int): Boolean { actions.add(editorAction); return true }
+        }
+        val info = EditorInfo().apply { this.inputType = inputType; this.imeOptions = imeOptions; initialSelStart = edit.selectionStart; initialSelEnd = edit.selectionEnd }
+        service.testIc = ic
+        service.testInfo = info
+        service.onStartInput(info, false)
+        service.onStartInputView(info, false)
+        layout()
+    }
+
+    private val enterKey get() = keyboard.layout!!.keys.first { it.code == KeyCode.ENTER }
+
+    @Test fun enterSendsInMultiLineChats() {
+        // Snapchat/WhatsApp style: a multi-line message box whose enter key is "Send".
+        val actions = ArrayList<Int>()
+        startChat(InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE or InputType.TYPE_TEXT_FLAG_CAP_SENTENCES, EditorInfo.IME_ACTION_SEND, actions)
+        type("hey whats up")
+        tap(enterKey)
+        assertEquals(listOf(EditorInfo.IME_ACTION_SEND), actions)
+        assertEquals("Hey what's up", text)
+        // Long-press enter still gives a new line.
+        assertTrue(service.onLongPress(enterKey))
+        sync()
+        assertEquals("Hey what's up\n", text)
+        assertEquals(1, actions.size)
+    }
+
+    @Test fun enterTypesNewLineWhereTheAppWantsOne() {
+        val actions = ArrayList<Int>()
+        startChat(InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE, EditorInfo.IME_ACTION_SEND or EditorInfo.IME_FLAG_NO_ENTER_ACTION, actions)
+        type("a")
+        tap(enterKey)
+        assertEquals("a\n", text)
+        assertTrue(actions.isEmpty())
+    }
+
+    @Test fun spaceCursorStopsAtTheEnds() {
+        type("hi")
+        type(" ")
+        assertTrue(service.onCursorMove(-1))
+        sync()
+        assertEquals(2, edit.selectionStart)
+        assertTrue(service.onCursorMove(-5))
+        sync()
+        assertEquals(0, edit.selectionStart)
+        // At the start: nothing moves, so nothing vibrates.
+        assertEquals(false, service.onCursorMove(-1))
+        assertTrue(service.onCursorMove(3))
+        sync()
+        assertEquals(false, service.onCursorMove(1))
+    }
+
+    @Test fun heldDeleteStopsWhenNothingIsLeft() {
+        type("ab")
+        assertTrue(service.onRepeatDelete()); sync()
+        assertTrue(service.onRepeatDelete()); sync()
+        assertEquals("", text)
+        assertEquals(false, service.onRepeatDelete())
+    }
+
+    @Test fun undoingAnAdaptiveKeyPickTeachesItToBackOff() {
+        val learning = service.logic.hitboxLearning
+        learning.reset()
+        assertEquals(1f, learning.damp('d', 's'), 0f)
+        type("ki")
+        // The finger was on "d", the adaptive keys typed "s"...
+        service.logic.onTapResolved('d', 's')
+        service.logic.onCharacter("s", 0f, 0f); sync()
+        // ...and the user took it back.
+        backspace()
+        assertTrue(learning.damp('d', 's') < 0.6f)
+        assertEquals(1f, learning.damp('f', 'd'), 0f)
+    }
+
+    @Test fun changingAnySettingWhileTypingNeverCrashes() {
+        val s = (org.robolectric.RuntimeEnvironment.getApplication() as SmartKeyboardApp).settings
+        type("hello ")
+        val keys = Settings::class.java.declaredFields
+            .filter { java.lang.reflect.Modifier.isStatic(it.modifiers) && it.type == String::class.java }
+            .mapNotNull { f -> f.isAccessible = true; f.get(null) as? String }
+        assertTrue(keys.size > 30)
+        for (open in listOf<() -> Unit>({}, { service.onToolbarAction(com.itzsuli.smartkeyboard.ime.SuggestionStripView.ToolbarAction.EMOJI) },
+            { service.onToolbarAction(com.itzsuli.smartkeyboard.ime.SuggestionStripView.ToolbarAction.CLIPBOARD) })) {
+            open(); idle()
+            for (k in keys) {
+                if (k == Settings.LANGUAGES || k == Settings.CURRENT_LANGUAGE || k == Settings.MIXED_LANGUAGES) continue
+                val old = s.prefs.all[k]
+                when (old) {
+                    is Boolean -> s.set(k, !old)
+                    is Int -> s.set(k, old + 1)
+                    else -> s.set(k, true)
+                }
+                idle()
+                s.prefs.edit().apply { if (old == null) remove(k) else when (old) { is Boolean -> putBoolean(k, old); is Int -> putInt(k, old); is String -> putString(k, old); else -> remove(k) } }.commit()
+                idle()
+            }
+            for (h in listOf(70, 140, 100)) { s.set(Settings.KEY_HEIGHT, h); idle() }
+            s.set(Settings.NUMBER_ROW, true); idle(); s.set(Settings.NUMBER_ROW, false); idle()
+        }
+        service.onKeyTap(com.itzsuli.smartkeyboard.ime.Key("ABC", KeyCode.ALPHABET), 0f, 0f)
+        idle()
+        layout()
+        type("ok ")
+        assertTrue(text, text.endsWith("ok "))
+    }
+
+    @Test fun emojiPanelStaysOpenWhileTypingEmoji() {
+        service.onToolbarAction(com.itzsuli.smartkeyboard.ime.SuggestionStripView.ToolbarAction.EMOJI)
+        idle()
+        fun panelOpen(v: View): Boolean = v is com.itzsuli.smartkeyboard.ime.EmojiPanel || (v is ViewGroup && (0 until v.childCount).any { panelOpen(v.getChildAt(it)) })
+        assertTrue(panelOpen(root))
+        // Picking an emoji saves the recents list in the shared settings file.
+        (org.robolectric.RuntimeEnvironment.getApplication() as SmartKeyboardApp).settings.prefs.edit().putString("emoji_recents", "😀").apply()
+        idle()
+        assertTrue(panelOpen(root))
+        // A new theme shows the keys in the new look.
+        (org.robolectric.RuntimeEnvironment.getApplication() as SmartKeyboardApp).settings.set(Settings.THEME, "neon")
+        idle()
+        assertEquals(false, panelOpen(root))
+    }
+
+    /** Types digits too (the test keyboard has a number row of long-press hints, so tap them as text). */
+    private fun typeArabizi(text: String) {
+        for (c in text) {
+            when {
+                c == ' ' -> tap(key(" "))
+                c.isDigit() -> { service.onKeyTap(com.itzsuli.smartkeyboard.ime.Key(c.toString(), KeyCode.TEXT, text = c.toString()), 0f, 0f); sync() }
+                else -> tap(key(c.lowercaseChar().toString()))
+            }
+            idle()
+        }
+    }
+
+    @Test fun arabiziBecomesArabic() {
+        waitUntil { service.logic.arabiziReady }
+        typeArabizi("7abibi ")
+        assertEquals("حبيبي ", text)
+        // Right after Arabic, plain Latin Arabizi converts too.
+        typeArabizi("kifak ")
+        assertEquals("حبيبي كيفك ", text)
+        // Backspace brings back what was typed, and it's remembered.
+        backspace()
+        assertEquals("حبيبي kifak", text)
+        typeArabizi(" ")
+        assertEquals("حبيبي kifak ", text)
+    }
+
+    @Test fun arabiziLeavesEnglishAlone() {
+        waitUntil { service.logic.arabiziReady }
+        typeArabizi("i think gr8 ")
+        assertEquals("I think gr8 ", text)
+        typeArabizi("salam ")
+        // Not English, but no Arabic around and no Arabizi digits: offered, not forced.
+        assertTrue(text, text.startsWith("I think gr8 sala") && text.none { it in '\u0600'..'\u06FF' })
+    }
+
+    @Test fun ownShortcutsAreOfferedOrExpanded() {
+        val app = org.robolectric.RuntimeEnvironment.getApplication() as SmartKeyboardApp
+        app.shortcuts.put("omw", "On my way!")
+        try {
+            type("omw ")
+            assertEquals("Omw ", text)
+            app.settings.set(Settings.SHORTCUTS_AUTO, true)
+            idle()
+            type("omw ")
+            assertEquals("Omw On my way! ", text)
+            backspace()
+            assertEquals("Omw omw", text)
+        } finally {
+            app.shortcuts.remove("omw")
+            app.settings.set(Settings.SHORTCUTS_AUTO, null)
+        }
+    }
+
+    @Test fun emojiSuggestionReplacesTheWord() {
+        val app = org.robolectric.RuntimeEnvironment.getApplication() as SmartKeyboardApp
+        type("so sad i could sob")
+        waitUntil { service.logic.shownSuggestions.any { it.kind == com.itzsuli.smartkeyboard.engine.Suggestion.Kind.EMOJI } }
+        val emoji = service.logic.shownSuggestions.first { it.kind == com.itzsuli.smartkeyboard.engine.Suggestion.Kind.EMOJI }
+        assertEquals("😭", emoji.text)
+        service.logic.onSuggestionPicked(emoji); sync()
+        assertEquals("So sad I could 😭 ", text)
+        // It's now the first of the recently used emoji.
+        assertEquals("😭", app.emojiRecents.used().first())
+        assertEquals("😭", app.emojiRecents.shown().first())
+    }
+
+    @Test fun swipedWordsGetEmojiToo() {
+        swipe("hello")
+        waitUntil { service.logic.shownSuggestions.any { it.kind == com.itzsuli.smartkeyboard.engine.Suggestion.Kind.EMOJI } }
+        val emoji = service.logic.shownSuggestions.first { it.kind == com.itzsuli.smartkeyboard.engine.Suggestion.Kind.EMOJI }
+        assertEquals("👋", emoji.text)
+        service.logic.onSuggestionPicked(emoji); sync()
+        assertEquals("👋 ", text)
+    }
+
+    @Test fun emojiForChatWordsAndLaughter() {
+        val data = com.itzsuli.smartkeyboard.data.EmojiData.get(activity)
+        assertEquals("😭", data.forWord("sob"))
+        assertEquals("😭", data.forWord("Sooob"))
+        assertEquals("❤️", data.forWord("loooove"))
+        for (w in listOf("hahahaha", "looool", "lmaooo", "xDD", "jajaja", "هههههه")) assertEquals(w, "😂", data.forWord(w))
+        assertEquals("🍕", data.forWord("pizza"))
+        assertEquals(null, data.forWord("the"))
+    }
+
+    @Test fun recentlyUsedEmojiComeFirst() {
+        val app = org.robolectric.RuntimeEnvironment.getApplication() as SmartKeyboardApp
+        // Before using any, popular ones fill the section.
+        assertEquals(com.itzsuli.smartkeyboard.data.EmojiRecents.STARTERS, app.emojiRecents.shown())
+        app.emojiRecents.add("🔥"); app.emojiRecents.add("🥳"); app.emojiRecents.add("🔥")
+        assertEquals(listOf("🔥", "🥳"), app.emojiRecents.shown())
+    }
+
+    @Test fun learnsNewWordsAfterTwoUses() {
+        // Whatever happens the first time, one undo is all it takes; after that the word is yours.
+        type("ok skrrt ")
+        if (!text.endsWith("skrrt ")) { backspace(); type(" ") }
+        type("skrrt ")
+        assertTrue(text, text.endsWith("skrrt skrrt "))
+        Thread.sleep(300); idle()
+        type("skrrt ")
+        assertTrue(text, text.endsWith("skrrt skrrt skrrt "))
+    }
+
+    @Test fun spaceComesByItselfAfterPunctuation() {
+        val app = org.robolectric.RuntimeEnvironment.getApplication() as SmartKeyboardApp
+        type("hey,you")
+        assertEquals("Hey, you", text)
+        // A space typed out of habit isn't doubled, and the next sentence starts with a capital.
+        type(". ")
+        assertEquals("Hey, you. ", text)
+        type("ok!cool")
+        assertEquals("Hey, you. Ok! Cool", text)
+        // "..." stays together.
+        type("...")
+        assertEquals("Hey, you. Ok! Cool... ", text)
+        // Numbers keep their dots and commas.
+        type("its 3.5,1,000")
+        assertTrue(text, text.endsWith(" 3.5,1,000"))
+        // Turned off, punctuation is just punctuation.
+        app.settings.set(Settings.SPACE_AFTER_PUNCT, false)
+        type(" ok,no")
+        assertTrue(text, text.endsWith(" ok,no"))
+        app.settings.set(Settings.SPACE_AFTER_PUNCT, null)
+    }
+
+    @Test fun holdingThePeriodOffersACommaFirst() {
+        val period = key(".")
+        assertEquals(listOf(",", "?", "!", "%"), period.popup.take(4))
+        assertTrue("…" !in period.popup)
+        // The comma is right under the finger, whatever the screen width.
+        val overlay = findOverlay(root)!!
+        val loc = IntArray(2).also { keyboard.getLocationInWindow(it) }
+        val oLoc = IntArray(2).also { overlay.getLocationInWindow(it) }
+        val dx = (loc[0] - oLoc[0]).toFloat(); val dy = (loc[1] - oLoc[1]).toFloat()
+        val r = android.graphics.RectF(period.bounds.left + dx, period.bounds.top + dy, period.bounds.right + dx, period.bounds.bottom + dy)
+        overlay.showPopup(period.popup, r)
+        overlay.selectPopupAt(r.centerX())
+        assertEquals(",", overlay.popupValue())
+        // Sliding left goes through the rest.
+        overlay.selectPopupAt(r.centerX() - r.width())
+        assertEquals("?", overlay.popupValue())
+        overlay.hidePopup()
+    }
+
+    @Test fun fixingATypoAtASentenceStartSavesNothing() {
+        val lex = (org.robolectric.RuntimeEnvironment.getApplication() as SmartKeyboardApp).languages.lexicon("en")
+        // "whst" at the start of a sentence, fixed by tapping the keyboard's own idea, three times.
+        repeat(3) {
+            type("whst")
+            waitUntil { service.logic.shownSuggestions.any { it.text == "What" } }
+            service.logic.onSuggestionPicked(service.logic.shownSuggestions.first { it.text == "What" }); sync()
+            type("is it. ")
+        }
+        waitUntil { lex.count("what") >= 3 }
+        // An ordinary slip isn't kept as a "learned fix", and the capital isn't learned either.
+        assertTrue(lex.correctionsFor("whst").toString(), lex.correctionsFor("whst").isEmpty())
+        assertEquals("what", lex.word("what")!!.display)
+        type("so what ")
+        assertTrue(text, text.endsWith("So what "))
+    }
+
+    @Test fun mixesGermanIntoTheEnglishKeyboard() {
+        // English + German are both enabled, so they are mixed by default.
+        assertEquals("English · Deutsch", keyboard.layout!!.keys.first { it.code == KeyCode.SPACE }.label)
+        // Long-press on u offers ü first (after the number).
+        assertEquals("ü", key("u").popup[1])
+        type("ich bin so mude. ")
+        assertEquals("Ich bin so müde. ", text)
+        type("danke fur alles. ")
+        assertTrue(text, text.endsWith("Danke für alles. "))
+        type("and then i said hello to the cat with soft fur ")
+        assertTrue(text, text.endsWith("And then I said hello to the cat with soft fur "))
+    }
+
+    @Test fun singleLanguageStillWorksWithMixingOff() {
+        val s = (org.robolectric.RuntimeEnvironment.getApplication() as SmartKeyboardApp).settings
+        s.set(Settings.MIXED_LANGUAGES, "")
+        idle(); waitUntil { service.logic.isReady }
+        assertEquals("English", keyboard.layout!!.keys.first { it.code == KeyCode.SPACE }.label)
+        type("i think teh ")
+        assertEquals("I think the ", text)
+    }
+
+    @Test fun aiProofreadsFinishedSentencesTheChillWay() {
+        FakeHttpServer().use { fake ->
+            fake.reply = """{"choices":[{"message":{"role":"assistant","content":"Me and him go there tomorrow."}}]}"""
+            val s = (org.robolectric.RuntimeEnvironment.getApplication() as SmartKeyboardApp).settings
+            s.set(Settings.AI_PROVIDER, "custom")
+            s.set(Settings.AI_BASE_URL, fake.baseUrl + "/v1")
+            s.set(Settings.AI_MODEL, "test-model")
+            s.set("${Settings.AI_KEY}_custom", "k")
+            s.set(Settings.AI_SUGGESTIONS, false)
+            s.set(Settings.AI_AUTO_PROOF, com.itzsuli.smartkeyboard.data.AiAutoProof.SUGGEST)
+            type("me and him goes there tomorow. ")
+            assertEquals("Me and him goes there tomorrow. ", text)
+            waitUntil { fake.requests > 0 }
+            Thread.sleep(200); idle()
+            // The sentence (after local fixes) went to the AI, wrapped and with the chill rules.
+            assertTrue(fake.lastBody, fake.lastBody.contains("<text>Me and him goes there tomorrow."))
+            assertTrue(fake.lastBody.contains("Keep it chill"))
+            service.onAiChipTapped()
+            sync()
+            assertEquals("Me and him go there tomorrow. ", text)
+        }
+    }
+
+    private fun useFakeAi(fake: FakeHttpServer) {
+        val s = (org.robolectric.RuntimeEnvironment.getApplication() as SmartKeyboardApp).settings
+        s.set(Settings.AI_PROVIDER, "custom")
+        s.set(Settings.AI_BASE_URL, fake.baseUrl + "/v1")
+        s.set(Settings.AI_MODEL, "test-model")
+        s.set("${Settings.AI_KEY}_custom", "k")
+        s.set(Settings.AI_SUGGESTIONS, false)
+    }
+
+    /** Starts a field in [pkg], as if the user switched to that app. */
+    private fun startIn(pkg: String) {
+        val type = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
+        edit.inputType = type
+        val info = EditorInfo().apply { inputType = type; packageName = pkg; initialSelStart = edit.selectionStart; initialSelEnd = edit.selectionEnd }
+        service.testIc = edit.onCreateInputConnection(EditorInfo())
+        service.testInfo = info
+        service.onStartInput(info, false)
+        service.onStartInputView(info, false)
+        layout()
+    }
+
+    @Test fun voiceIsProofreadInTheAppsTone() {
+        FakeHttpServer().use { fake ->
+            fake.reply = """{"choices":[{"message":{"role":"assistant","content":"Could you send me the report, please?"}}]}"""
+            useFakeAi(fake)
+            // Gmail: polite.
+            startIn("com.google.android.gm")
+            service.logic.onVoiceText("could u send me the report pls")
+            sync()
+            waitUntil { fake.requests > 0 && text.startsWith("Could you send") }
+            assertEquals("Could you send me the report, please? ", text)
+            assertTrue(fake.lastBody, fake.lastBody.contains("email"))
+            // The fix can be undone from the chip.
+            service.onAiChipTapped(); sync()
+            assertEquals("Could u send me the report pls ", text)
+        }
+    }
+
+    @Test fun chatAppsGetTheChillTone() {
+        FakeHttpServer().use { fake ->
+            fake.reply = """{"choices":[{"message":{"role":"assistant","content":"yo wanna grab food later"}}]}"""
+            useFakeAi(fake)
+            startIn("com.whatsapp")
+            service.logic.onVoiceText("yo wanna grab food latr")
+            sync()
+            waitUntil { fake.requests > 0 }
+            Thread.sleep(200); idle()
+            assertTrue(fake.lastBody, fake.lastBody.contains("Keep it chill"))
+            assertTrue(fake.lastBody, !fake.lastBody.contains("email"))
+        }
+    }
+
+    @Test fun rendersKeyboardScreenshots() {
+        val out = File("build/screenshots").apply { mkdirs() }
+        fun shot(name: String) {
+            layout()
+            val full = Bitmap.createBitmap(root.width, root.height, Bitmap.Config.ARGB_8888)
+            root.draw(Canvas(full))
+            // Keep a little of the transparent preview band so popups above the top row show.
+            val top = (service.previewSpacePx - 40).coerceAtLeast(0)
+            val bmp = Bitmap.createBitmap(full, 0, top, full.width, full.height - top)
+            File(out, "$name.png").outputStream().use { bmp.compress(Bitmap.CompressFormat.PNG, 100, it) }
+        }
+        type("how are ")
+        Thread.sleep(200); idle()
+        shot("english_light")
+        // German on the English keyboard: German suggestions for a German sentence.
+        type(". ich bin so mu")
+        Thread.sleep(300); idle()
+        shot("mixed")
+        type("de ")
+        // Swipe trail for "hello" as drawn mid-gesture.
+        val overlay = findOverlay(root)!!
+        val loc = IntArray(2).also { keyboard.getLocationInWindow(it) }
+        val oLoc = IntArray(2).also { overlay.getLocationInWindow(it) }
+        overlay.trailStart()
+        var px = Float.NaN; var py = Float.NaN
+        for (c in "hello") {
+            val k = key(c.toString())
+            val x = k.bounds.centerX() + loc[0] - oLoc[0]
+            val y = k.bounds.centerY() + loc[1] - oLoc[1]
+            if (!px.isNaN()) for (i in 1..16) overlay.trailAdd(px + (x - px) * i / 16f, py + (y - py) * i / 16f) else overlay.trailAdd(x, y)
+            px = x; py = y
+        }
+        service.showSwipePreview("hello")
+        shot("swipe")
+        overlay.trailEnd()
+        // Let the trail fade out (the test clock only moves when told to).
+        shadowOf(Looper.getMainLooper()).idleFor(java.time.Duration.ofSeconds(1))
+        // Long-press accents on "e" (top row: the popup lives in the band above the keys).
+        val e = key("e")
+        overlay.showPopup(listOf("3", "é", "è", "ê", "ë", "ē"), android.graphics.RectF(e.bounds.left + loc[0] - oLoc[0], e.bounds.top + loc[1] - oLoc[1],
+            e.bounds.right + loc[0] - oLoc[0], e.bounds.bottom + loc[1] - oLoc[1]))
+        // The finger starts on the key (the digit is picked), then slides one key right: "é".
+        overlay.selectPopupAt(e.bounds.centerX() + loc[0] - oLoc[0])
+        assertEquals("3", overlay.popupValue())
+        overlay.selectPopupAt(e.bounds.centerX() + e.bounds.width() + loc[0] - oLoc[0])
+        assertEquals("é", overlay.popupValue())
+        shot("accents")
+        overlay.hidePopup()
+        Thread.sleep(400)
+        service.showAiChip("✨ Me and him go there tomorrow.")
+        shot("ai_chip")
+        service.showAiChip(null)
+        // The voice panel, drawn on its own (the real one needs the microphone).
+        run {
+            val panel = com.itzsuli.smartkeyboard.ime.VoicePanel(activity, com.itzsuli.smartkeyboard.ime.KeyboardTheme.DARK, "English", {}, {}, {})
+            panel.showPartial("hey are you coming tonight")
+            panel.measure(View.MeasureSpec.makeMeasureSpec(1233, View.MeasureSpec.EXACTLY), View.MeasureSpec.makeMeasureSpec(780, View.MeasureSpec.EXACTLY))
+            panel.layout(0, 0, 1233, 780)
+            val bmp = Bitmap.createBitmap(1233, 780, Bitmap.Config.ARGB_8888)
+            panel.draw(Canvas(bmp))
+            File(out, "voice.png").outputStream().use { bmp.compress(Bitmap.CompressFormat.PNG, 100, it) }
+        }
+        service.onToolbarAction(com.itzsuli.smartkeyboard.ime.SuggestionStripView.ToolbarAction.EMOJI)
+        repeat(5) { idle(); Thread.sleep(30) }
+        shot("emoji")
+        service.onAiClose()
+        repeat(3) { idle() }
+        // Arabizi on the English keyboard: Arabic suggestions for "7abib".
+        waitUntil { service.logic.arabiziReady }
+        typeArabizi(". ya 7abib")
+        Thread.sleep(300); idle()
+        shot("arabizi")
+        typeArabizi("i ")
+        val s = (org.robolectric.RuntimeEnvironment.getApplication() as SmartKeyboardApp).settings
+        for (t in listOf("dark", "sunset", "neon", "glass", "midnight", "aurora", "cyberpunk", "rose_gold", "mint")) {
+            s.set(Settings.THEME, t)
+            idle()
+            shot("theme_$t")
+        }
+        // Your own colours, a rounded serif look, capital letters and a rainbow trail.
+        s.set(Settings.CUSTOM_BG, 0xFF2D0A3E.toInt()); s.set(Settings.CUSTOM_BG2, 0xFF0B2545.toInt())
+        s.set(Settings.CUSTOM_KEY, 0x33FFFFFF); s.set(Settings.CUSTOM_TEXT, 0xFFFFE4EE.toInt())
+        s.set(Settings.ACCENT, 0xFFFF5C8A.toInt()); s.set(Settings.KEY_FONT, com.itzsuli.smartkeyboard.data.KeyFont.SERIF)
+        s.set(Settings.CAPITAL_LABELS, true); s.set(Settings.TRAIL_STYLE, com.itzsuli.smartkeyboard.data.TrailStyle.RAINBOW)
+        s.set(Settings.TRAIL_WIDTH, 9); s.set(Settings.THEME, "custom")
+        idle()
+        overlay.trailStart()
+        px = Float.NaN; py = Float.NaN
+        for (c in "rainbow") {
+            val k = key(c.toString())
+            val x = k.bounds.centerX() + loc[0] - oLoc[0]
+            val y = k.bounds.centerY() + loc[1] - oLoc[1]
+            if (!px.isNaN()) for (i in 1..16) overlay.trailAdd(px + (x - px) * i / 16f, py + (y - py) * i / 16f) else overlay.trailAdd(x, y)
+            px = x; py = y
+        }
+        shot("theme_custom")
+        overlay.trailEnd()
+        // Let the trail fade out (the test clock only moves when told to).
+        shadowOf(Looper.getMainLooper()).idleFor(java.time.Duration.ofSeconds(1))
+        for (k in listOf(Settings.ACCENT, Settings.KEY_FONT, Settings.CAPITAL_LABELS, Settings.TRAIL_STYLE, Settings.TRAIL_WIDTH)) s.set(k, null)
+        s.set(Settings.THEME, "glass"); idle()
+        s.set(Settings.CURRENT_LANGUAGE, "de"); idle(); waitUntil { service.logic.isReady }; shot("german")
+        s.set(Settings.CURRENT_LANGUAGE, "ar"); idle(); waitUntil { service.logic.isReady }; shot("arabic")
+        tap(keyboard.layout!!.keys.first { it.code == KeyCode.SYMBOLS }); shot("symbols")
+    }
+}
